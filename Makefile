@@ -1,10 +1,10 @@
-.PHONY: help sync dev test lint typecheck up down ps logs db-check migration-check
+.PHONY: help sync dev test lint typecheck up down ps logs db-check migration-check app-check
 
 COMPOSE := docker compose --env-file backend/.env
 
 help:
 	@echo "sync       装依赖"
-	@echo "dev        起开发服务器          [Step 6 之后可用]"
+	@echo "dev        起开发服务器"
 	@echo "test       跑测试                [Step 9 之后可用]"
 	@echo "lint       ruff 检查             [Step 10 之后可用]"
 	@echo "typecheck  mypy 检查             [Step 10 之后可用]"
@@ -14,6 +14,7 @@ help:
 	@echo "logs       看容器日志"
 	@echo "db-check   验收 async 数据库基础设施"
 	@echo "migration-check  验收 Alembic revision、users schema 与零残留约束探针"
+	@echo "app-check  验收 FastAPI lifespan、路由前缀、OpenAPI 与 CORS"
 
 sync:
 	cd backend && uv sync
@@ -47,3 +48,6 @@ db-check:
 
 migration-check:
 	cd backend && uv run python scripts/check_migrations.py
+
+app-check:
+	cd backend && uv run python scripts/check_app.py

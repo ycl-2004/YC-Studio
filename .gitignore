@@ -9,6 +9,9 @@
 .vscode/
 .idea/
 
+.fable/
+.fable
+
 # Docker volume 挂载的本地数据
 /data/
 /pgdata/

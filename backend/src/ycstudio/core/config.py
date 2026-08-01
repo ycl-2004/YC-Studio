@@ -22,7 +22,7 @@ class Settings(BaseSettings):
     app_name: str = "YC Studio"
     environment: Literal["development", "test", "production"] = "development"
     debug: bool = False
-    api_prefix: str = "/api/v1"
+    api_prefix: str = "/api"
     cors_origins: list[str] = Field(
         default_factory=lambda: [
             "http://localhost:5173",
