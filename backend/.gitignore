@@ -1,0 +1,36 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 环境与虚拟环境
+.venv/
+.env*
+!.env.example
+
+# 本地数据（绝不进版本控制）
+/data/
+/uploads/
+/media/
+*.db
+*.sqlite3
+
+# 模型缓存（几 GB，挂 volume 不进 git）
+/.cache/
+/models/
+/.huggingface/
+
+# 日志
+*.log
+/logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+
+# macOS
+.DS_Store

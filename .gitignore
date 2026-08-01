@@ -1,0 +1,22 @@
+# macOS
+.DS_Store
+
+# 环境变量（任何层级都不进版本控制）
+.env*
+!.env.example
+
+# IDE
+.vscode/
+.idea/
+
+# Docker volume 挂载的本地数据
+/data/
+/pgdata/
+
+# Stage 0 Step 11 再正式加入；当前只保留本地草稿
+/backend/.dockerignore
+/backend/Dockerfile
+/backend/docker-entrypoint.sh
+
+# 日志
+*.log
