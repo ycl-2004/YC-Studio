@@ -1,0 +1,4 @@
+YC Studio single-database Alembic environment using SQLAlchemy asyncio and asyncpg.
+
+The database URL is loaded from backend/.env through ycstudio.core.config.Settings.
+Model metadata is provided by ycstudio.db.base.Base after importing ycstudio.db.models.

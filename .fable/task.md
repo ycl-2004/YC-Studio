@@ -1,43 +1,56 @@
-# Stage 0 Step 4 — SQLAlchemy async foundation
+# Stage 0 Step 5 — Alembic initialization and first migration
 
 ## Goal
 
-Build and verify the production database foundation without pulling Step 6 FastAPI
-application assembly forward.
+Make PostgreSQL schema changes reproducible and reversible with an async Alembic environment,
+an initial `users` model, and a separately reviewed pgvector extension migration.
 
 ## Acceptance criteria
 
-- `DeclarativeBase`, `AsyncEngine`, `async_sessionmaker`, and `get_session` exist in `db/`.
-- Pool configuration comes from Settings and `pool_pre_ping` is enabled.
-- Commit policy is explicit: services commit; the dependency rolls back failures and closes.
-- A real PostgreSQL probe passes `SELECT 1`.
-- Ten concurrent tasks use independent sessions without pool exhaustion.
-- Explicit commit persists, while 50 injected failures roll back and do not leak connections.
-- Probe artifacts are removed from PostgreSQL after the run.
-- Relevant docs and progress markers match observed evidence.
+- Alembic uses the official async template and the locked `asyncpg` database URL.
+- `env.py` loads `Settings`, imports project models, and exposes `Base.metadata`.
+- The first `User` model is minimal, typed with SQLAlchemy 2.0, and registered in metadata.
+- A hand-written revision enables the PostgreSQL `vector` extension.
+- A reviewed autogenerate revision creates `users` and cleanly drops it on downgrade.
+- `alembic upgrade head`, `downgrade -1`, and re-upgrade all succeed against the real database.
+- The `vector` extension and final users schema are verified from PostgreSQL.
+- Formatting, lint, typing, and existing database regression checks pass.
+- Step 5 docs reflect only observed evidence.
 
 ## Requirements (append-only)
 
-1. Follow Stage 0 Step 4 in the implementation manual.
-2. Explain where code belongs and which terminal commands reproduce the checks.
-3. Use SQLAlchemy 2.0 async patterns compatible with the locked dependencies.
-4. Do not create the complete FastAPI app before Step 6.
-5. Add new questions and conclusions to the Stage 0 Step 4 question note.
+1. Follow Stage 0 Step 5 in the implementation manual and the project architecture docs.
+2. Use Alembic 1.18.5, SQLAlchemy 2.0.51, and asyncpg 0.31.0 locked by `uv.lock`.
+3. Keep the initial user schema minimal; do not implement authentication early.
+4. Keep pgvector extension creation in a hand-written migration because autogenerate cannot infer it.
+5. Human-review generated migration content before applying it.
+6. Do not commit, stage, push, or modify Docker drafts.
+7. Update the Step 5 learning note and implementation checklist with actual results.
+8. Add a realistic repeatable script check for migration head, schema, rollback-safe ORM I/O,
+   uniqueness enforcement, and zero persisted probe rows.
 
 ## Decision log
 
-- 2026-08-01: Use service-level explicit commit; `get_session` owns rollback and close only.
-- 2026-08-01: Use a repeatable CLI probe instead of a temporary HTTP route because the app
-  assembly is intentionally scheduled for Step 6.
-- 2026-08-01: Configure a five-connection base pool plus five overflow connections so the
-  ten-task acceptance check has an explicit, understandable limit.
+- 2026-08-01: Use two linear revisions: vector extension first, users table second.
+- 2026-08-01: Use UUID user IDs so every later `user_id` foreign key is ready for the planned
+  single-user-now, extensible-later architecture.
+- 2026-08-01: Limit the first users table to identity and audit fields; authentication fields
+  belong to the later authentication stage.
 
 ## Evidence
 
-- `ruff format --check .`: 32 files formatted.
-- `ruff check .`: all checks passed.
-- `mypy src`: no issues in 27 source files.
-- Step 4 probe: temporary `SELECT 1` route passed.
-- Step 4 probe: 10 concurrent requests passed with independent sessions.
-- Step 4 probe: explicit commit persisted; 50 injected request failures rolled back.
-- PostgreSQL `to_regclass` check confirmed the probe table was removed.
+- Official async Alembic 1.18.5 template initialized under `backend/migrations`.
+- `0001` applied successfully and idempotently enabled/registered pgvector.
+- Autogenerate reported only `Detected added table 'users'`; `0002` was manually reviewed.
+- First `upgrade head` created the expected UUID/email/timestamptz users schema at revision 0002.
+- `downgrade -1` removed users, returned to 0001, and preserved vector 0.8.2.
+- Re-upgrade restored revision 0002 and `alembic check` found no new operations.
+- `ruff format --check .`: 36 files formatted; `ruff check .`: passed.
+- `mypy src`: passed for 28 source files.
+- Existing async database probe passed all four checks and removed its probe table.
+- `make migration-check` passed revision/head, vector, reflected schema, rollback-safe ORM
+  round-trip, duplicate-email enforcement, and zero-residue checks.
+- The migration check script passed its focused Ruff and mypy checks.
+- `pytest`: zero tests collected (exit 5); the test skeleton remains scheduled for Step 9.
+- Outstanding by user instruction: migrations are uncommitted, so the version-control checkbox
+  remains open until the user creates the Step 5 commit.

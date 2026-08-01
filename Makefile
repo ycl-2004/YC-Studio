@@ -1,4 +1,4 @@
-.PHONY: help sync dev test lint typecheck up down ps logs db-check
+.PHONY: help sync dev test lint typecheck up down ps logs db-check migration-check
 
 COMPOSE := docker compose --env-file backend/.env
 
@@ -13,6 +13,7 @@ help:
 	@echo "ps         看依赖服务状态"
 	@echo "logs       看容器日志"
 	@echo "db-check   验收 async 数据库基础设施"
+	@echo "migration-check  验收 Alembic revision、users schema 与零残留约束探针"
 
 sync:
 	cd backend && uv sync
@@ -43,3 +44,6 @@ logs:
 
 db-check:
 	cd backend && uv run python scripts/check_db.py
+
+migration-check:
+	cd backend && uv run python scripts/check_migrations.py
