@@ -12,7 +12,7 @@
 
 | Stage | 状态 |
 |:-:|---|
-| 0 地基与可观测 | 🚧 进行中（Step 2 完成） |
+| 0 地基与可观测 | 🚧 进行中（Step 3 完成） |
 | 1–11 | ⬜ 未开始 |
 
 ## 结构
@@ -25,6 +25,28 @@ frontend/    Vue，页面交给 AI 生成
 `backend/src/ycstudio/` 下 14 个模块的职责见 vault 里的《代码目录结构蓝图》。
 
 ## 开发
+
+第一次运行先创建本地环境文件，并把示例密码换成本机开发密码；
+`POSTGRES_PASSWORD` 和 `DATABASE_URL` 里的密码必须保持一致。
+
+```bash
+cp backend/.env.example backend/.env
+```
+
+启动和管理 PostgreSQL + pgvector、Redis：
+
+```bash
+make up                    # 后台启动 db + redis
+make ps                    # 查看健康状态
+make logs                  # 持续查看两个服务的日志
+make down                  # 停止并删除容器，保留数据卷
+```
+
+PostgreSQL 绑定在 `127.0.0.1:5433`，Redis 绑定在
+`127.0.0.1:6380`，避免和本机默认端口上的服务冲突。数据保存在 Docker
+命名卷中；不要运行 `docker compose down -v`，除非确定要删除本地数据。
+
+Python 开发命令：
 
 ```bash
 cd backend
