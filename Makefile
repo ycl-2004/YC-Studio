@@ -1,4 +1,4 @@
-.PHONY: help sync dev test lint typecheck up down ps logs
+.PHONY: help sync dev test lint typecheck up down ps logs db-check
 
 COMPOSE := docker compose --env-file backend/.env
 
@@ -12,6 +12,7 @@ help:
 	@echo "down       停依赖服务"
 	@echo "ps         看依赖服务状态"
 	@echo "logs       看容器日志"
+	@echo "db-check   验收 async 数据库基础设施"
 
 sync:
 	cd backend && uv sync
@@ -39,3 +40,6 @@ ps:
 
 logs:
 	$(COMPOSE) logs -f db redis
+
+db-check:
+	cd backend && uv run python scripts/check_db.py

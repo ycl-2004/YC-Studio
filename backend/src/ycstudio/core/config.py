@@ -32,6 +32,9 @@ class Settings(BaseSettings):
 
     # Database
     database_url: str
+    db_pool_size: int = Field(default=5, ge=1)
+    db_max_overflow: int = Field(default=5, ge=0)
+    db_pool_timeout: float = Field(default=30.0, gt=0)
 
     # Redis
     redis_url: str
