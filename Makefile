@@ -20,7 +20,7 @@ sync:
 	cd backend && uv sync
 
 dev:
-	cd backend && uv run uvicorn ycstudio.main:app --reload
+	cd backend && uv run uvicorn app.main:app --reload
 
 test:
 	cd backend && uv run pytest
@@ -29,7 +29,7 @@ lint:
 	cd backend && uv run ruff check .
 
 typecheck:
-	cd backend && uv run mypy src
+	cd backend && uv run mypy app
 
 up:
 	$(COMPOSE) up -d db redis

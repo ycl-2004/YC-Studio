@@ -11,8 +11,8 @@ import asyncio
 
 from httpx import ASGITransport, AsyncClient
 
-from ycstudio.core.config import get_settings
-from ycstudio.main import create_app
+from app.core.config import get_settings
+from app.main import create_app
 
 
 def check_factory() -> None:

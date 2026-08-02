@@ -15,9 +15,9 @@ from fastapi.middleware.cors import CORSMiddleware
 from redis.asyncio import Redis
 from sqlalchemy import text
 
-from ycstudio.api import api_router
-from ycstudio.core.config import get_settings
-from ycstudio.db.session import engine
+from app.api import api_router
+from app.core.config import get_settings
+from app.db.session import engine
 
 logger = logging.getLogger("uvicorn.error")
 

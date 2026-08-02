@@ -15,8 +15,8 @@ from sqlalchemy.engine.interfaces import (
 )
 from sqlalchemy.exc import IntegrityError
 
-from ycstudio.db.models import User
-from ycstudio.db.session import async_session_factory, engine
+from app.db.models import User
+from app.db.session import async_session_factory, engine
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 TEST_EMAIL_DOMAIN = "example.invalid"

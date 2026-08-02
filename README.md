@@ -22,7 +22,7 @@ backend/     Python + FastAPI，学习重点
 frontend/    Vue，页面交给 AI 生成
 ```
 
-`backend/src/ycstudio/` 下 14 个模块的职责见 vault 里的《代码目录结构蓝图》。
+`backend/app/` 下 14 个模块的职责见 vault 里的《代码目录结构蓝图》。
 
 ## 开发
 
@@ -54,7 +54,7 @@ cd backend
 uv sync                  # 装依赖
 uv run pytest            # 跑测试
 uv run ruff check .      # lint
-uv run uvicorn ycstudio.main:app --reload   # Step 6 之后可用
+uv run uvicorn app.main:app --reload   # Step 6 之后可用
 ```
 
 ## Python 版本说明

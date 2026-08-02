@@ -6,7 +6,7 @@ from uuid import UUID, uuid4
 from sqlalchemy import DateTime, String, func
 from sqlalchemy.orm import Mapped, mapped_column
 
-from ycstudio.db.base import Base
+from app.db.base import Base
 
 
 class User(Base):

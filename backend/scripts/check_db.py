@@ -8,7 +8,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ycstudio.db.session import async_session_factory, engine, get_session
+from app.db.session import async_session_factory, engine, get_session
 
 PROBE_TABLE = "stage0_step4_probe"
 probe_app = FastAPI()
