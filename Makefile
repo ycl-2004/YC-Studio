@@ -5,7 +5,7 @@ COMPOSE := docker compose --env-file backend/.env
 help:
 	@echo "sync       装依赖"
 	@echo "dev        起开发服务器"
-	@echo "test       跑测试                [Step 9 之后可用]"
+	@echo "test       用隔离容器跑完整 pytest 测试"
 	@echo "lint       ruff 检查             [Step 10 之后可用]"
 	@echo "typecheck  mypy 检查             [Step 10 之后可用]"
 	@echo "up         起依赖服务            [Step 3 之后可用]"

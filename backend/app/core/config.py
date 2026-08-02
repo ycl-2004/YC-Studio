@@ -1,3 +1,4 @@
+import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
@@ -8,12 +9,23 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 # app/core/config.py -> app/core -> app -> backend
 BACKEND_DIR = Path(__file__).resolve().parents[2]
 
+# This selector is intentionally read before Settings is constructed. An empty value
+# disables dotenv loading, which keeps automated tests independent from backend/.env.
+_env_file_override = os.getenv("YCSTUDIO_ENV_FILE")
+SETTINGS_ENV_FILE: Path | None = (
+    BACKEND_DIR / ".env"
+    if _env_file_override is None
+    else Path(_env_file_override).expanduser()
+    if _env_file_override.strip()
+    else None
+)
+
 
 class Settings(BaseSettings):
-    """Application settings loaded from environment variables and backend/.env."""
+    """Application settings loaded from environment variables and an optional dotenv file."""
 
     model_config = SettingsConfigDict(
-        env_file=BACKEND_DIR / ".env",
+        env_file=SETTINGS_ENV_FILE,
         env_file_encoding="utf-8",
         case_sensitive=False,
         extra="ignore",

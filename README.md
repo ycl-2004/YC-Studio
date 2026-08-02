@@ -12,7 +12,7 @@
 
 | Stage | 状态 |
 |:-:|---|
-| 0 地基与可观测 | 🚧 进行中（Step 1–8 完成） |
+| 0 地基与可观测 | 🚧 进行中（Step 1–9 完成） |
 | 1–11 | ⬜ 未开始 |
 
 ## 结构
@@ -57,6 +57,12 @@ uv run pytest            # 跑测试
 uv run ruff check .      # lint
 uv run uvicorn app.main:app --reload   # Step 6 之后可用
 ```
+
+`make test` / `uv run pytest` 使用 Testcontainers 自动创建临时的 pgvector/PostgreSQL
+和 Redis，并在临时数据库中执行 `alembic upgrade head`。测试明确禁止读取
+`backend/.env`，也不会连接 `127.0.0.1:5433` 或 `127.0.0.1:6380` 的开发服务；只需保证
+Docker Engine 正在运行，不需要先执行 `make up`。每个测试结束后会回滚外层 transaction，
+即使被测代码调用了 `commit()`，也不会把测试 User 留到下一个测试。
 
 应用运行后，GET /health 只检查进程存活；GET /ready 会实际检查 PostgreSQL
 与 Redis。依赖暂时不可用时，/ready 返回 503，但 /health 仍保持 200。

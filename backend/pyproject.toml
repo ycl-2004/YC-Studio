@@ -23,6 +23,7 @@ dev = [
     "httpx",            # Step 9
     "ruff",             # Step 10
     "mypy",             # Step 10
+    "testcontainers[postgres,redis]>=4.15.0",  # Step 9 isolated dependencies
 ]
 
 [build-system]
@@ -47,4 +48,6 @@ ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+asyncio_default_test_loop_scope = "function"
 testpaths = ["tests"]
