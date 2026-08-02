@@ -11,6 +11,7 @@
 
 .fable/
 .fable
+Documents
 
 # Docker volume 挂载的本地数据
 /data/
