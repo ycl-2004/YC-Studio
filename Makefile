@@ -1,4 +1,4 @@
-.PHONY: help sync dev test lint typecheck up down ps logs db-check migration-check app-check logging-check
+.PHONY: help sync dev test lint typecheck up down ps logs db-check migration-check app-check logging-check health-check
 
 COMPOSE := docker compose --env-file backend/.env
 
@@ -16,6 +16,7 @@ help:
 	@echo "migration-check  验收 Alembic revision、users schema 与零残留约束探针"
 	@echo "app-check  验收 FastAPI lifespan、路由前缀、OpenAPI 与 CORS"
 	@echo "logging-check  验收 request_id、生产 JSON、Uvicorn/SQLAlchemy 与异常日志"
+	@echo "health-check  验收 liveness、readiness、数据库故障与自动恢复"
 
 sync:
 	cd backend && uv sync
@@ -55,3 +56,6 @@ app-check:
 
 logging-check:
 	cd backend && uv run python scripts/check_logging.py
+
+health-check:
+	cd backend && uv run python scripts/check_health.py

@@ -44,6 +44,22 @@ async def check_lifespan_routes_and_cors() -> None:
             UUID(docs_response.headers[REQUEST_ID_HEADER])
             print("PASS /docs is reachable and returns a UUID request ID")
 
+            health_response = await client.get("/health")
+            assert health_response.status_code == 200
+            assert health_response.json() == {"status": "ok"}
+            UUID(health_response.headers[REQUEST_ID_HEADER])
+            print("PASS /health is dependency-free and returns a UUID request ID")
+
+            ready_response = await client.get("/ready")
+            assert ready_response.status_code == 200
+            assert ready_response.json() == {
+                "status": "ready",
+                "dependencies": {"postgres": "ok", "redis": "ok"},
+                "failed_dependencies": [],
+            }
+            UUID(ready_response.headers[REQUEST_ID_HEADER])
+            print("PASS /ready verifies PostgreSQL and Redis")
+
             allowed_origin = settings.cors_origins[0]
             index_response = await client.get(
                 f"{settings.api_prefix}/",
@@ -64,9 +80,10 @@ async def check_lifespan_routes_and_cors() -> None:
             openapi_response = await client.get("/openapi.json")
             assert openapi_response.status_code == 200
             paths = openapi_response.json()["paths"]
-            assert list(paths) == [f"{settings.api_prefix}/"]
+            assert set(paths) == {"/health", "/ready", f"{settings.api_prefix}/"}
             print(
-                f"PASS OpenAPI exposes only the expected {settings.api_prefix}/ application route"
+                "PASS OpenAPI exposes only /health, /ready, "
+                f"and the expected {settings.api_prefix}/ application route"
             )
 
             cors_response = await client.options(

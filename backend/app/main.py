@@ -75,7 +75,7 @@ def create_app() -> FastAPI:
         expose_headers=[REQUEST_ID_HEADER],
     )
     application.add_middleware(RequestContextMiddleware)
-    application.include_router(api_router, prefix=settings.api_prefix)
+    application.include_router(api_router)
     return application
 
 

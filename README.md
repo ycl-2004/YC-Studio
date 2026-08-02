@@ -12,7 +12,7 @@
 
 | Stage | 状态 |
 |:-:|---|
-| 0 地基与可观测 | 🚧 进行中（Step 1–6 完成） |
+| 0 地基与可观测 | 🚧 进行中（Step 1–8 完成） |
 | 1–11 | ⬜ 未开始 |
 
 ## 结构
@@ -39,6 +39,7 @@ cp backend/.env.example backend/.env
 make up                    # 后台启动 db + redis
 make ps                    # 查看健康状态
 make db-check              # 验收 SQLAlchemy async session
+make health-check          # 验收 /health、/ready 与数据库故障恢复
 make logs                  # 持续查看两个服务的日志
 make down                  # 停止并删除容器，保留数据卷
 ```
@@ -56,6 +57,9 @@ uv run pytest            # 跑测试
 uv run ruff check .      # lint
 uv run uvicorn app.main:app --reload   # Step 6 之后可用
 ```
+
+应用运行后，GET /health 只检查进程存活；GET /ready 会实际检查 PostgreSQL
+与 Redis。依赖暂时不可用时，/ready 返回 503，但 /health 仍保持 200。
 
 ## Python 版本说明
 

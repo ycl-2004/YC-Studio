@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     environment: Literal["development", "test", "production"] = "development"
     debug: bool = False
     api_prefix: str = "/api"
+    readiness_timeout_seconds: float = Field(default=1.0, gt=0, le=10.0)
     cors_origins: list[str] = Field(
         default_factory=lambda: [
             "http://localhost:5173",
