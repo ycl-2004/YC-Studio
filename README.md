@@ -14,14 +14,14 @@
 
 | Stage | 状态 |
 |:-:|---|
-| 0 地基与可观测 | 🚧 进行中（Step 1–10 完成） |
+| 0 地基与可观测 | ✅ Step 1–11 本地实现与验收完成（Step 11 待提交） |
 | 1–11 | ⬜ 未开始 |
 
 ## 结构
 
 ```text
 backend/     Python + FastAPI，学习重点
-frontend/    Vue，页面交给 AI 生成
+frontend/    Stage 0 nginx 占位页；Stage 4 再实现 Vue
 ```
 
 `backend/app/` 下 14 个模块的职责见 vault 里的《代码目录结构蓝图》。
@@ -35,20 +35,30 @@ frontend/    Vue，页面交给 AI 生成
 cp backend/.env.example backend/.env
 ```
 
-启动和管理 PostgreSQL + pgvector、Redis：
+一条命令构建并启动 PostgreSQL + pgvector、Redis、backend、frontend：
 
 ```bash
-make up                    # 后台启动 db + redis
-make ps                    # 查看健康状态
+make up                    # 构建四服务并等待全部 healthy
+make ps                    # 四个服务都应显示 healthy
 make db-check              # 验收 SQLAlchemy async session
 make health-check          # 验收 /health、/ready 与数据库故障恢复
-make logs                  # 持续查看两个服务的日志
+make logs                  # 持续查看四服务日志
 make down                  # 停止并删除容器，保留数据卷
 ```
 
-PostgreSQL 绑定在 `127.0.0.1:5433`，Redis 绑定在
-`127.0.0.1:6380`，避免和本机默认端口上的服务冲突。数据保存在 Docker
+也可以直接运行 `docker compose --env-file backend/.env up --build` 在前台查看启动过程。Backend 启动前会自动执行
+`alembic upgrade head`，db/Redis healthy 后才启动 backend，backend healthy 后才启动 frontend。
+
+Frontend、API、PostgreSQL、Redis 分别绑定在 `127.0.0.1:5173`、`127.0.0.1:8000`、
+`127.0.0.1:5433`、`127.0.0.1:6380`。数据保存在 Docker
 命名卷中；不要运行 `docker compose down -v`，除非确定要删除本地数据。
+
+容器内检查：
+
+```bash
+docker compose --env-file backend/.env exec backend whoami
+docker compose --env-file backend/.env exec backend alembic current
+```
 
 Python 开发命令：
 
@@ -58,6 +68,13 @@ uv sync                  # 装依赖
 uv run pytest            # 跑测试
 uv run ruff check .      # lint
 uv run uvicorn app.main:app --reload   # Step 6 之后可用
+```
+
+如果要在宿主机用 `--reload` 开发 backend，只启动依赖后再启动本地进程：
+
+```bash
+make infra-up
+make dev
 ```
 
 `make test` / `uv run pytest` 使用 Testcontainers 自动创建临时的 pgvector/PostgreSQL

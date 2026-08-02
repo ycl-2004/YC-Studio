@@ -1,0 +1,39 @@
+# 必须排除：本地 venv 有几百 MB，且里面的二进制是宿主机架构的
+.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+
+# 缓存
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 绝不进镜像
+.env
+.env.*
+!.env.example
+
+# 本地数据与模型缓存
+data/
+uploads/
+media/
+models/
+.cache/
+.huggingface/
+*.db
+*.sqlite3
+
+# 其他
+.git/
+.gitignore
+*.log
+logs/
+.DS_Store
+.vscode/
+.idea/
+
+# runtime 镜像不需要的开发内容
+tests/
+scripts/
+seeds/

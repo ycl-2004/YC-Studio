@@ -1,4 +1,4 @@
-.PHONY: help sync dev test lint typecheck up down ps logs db-check migration-check app-check logging-check health-check
+.PHONY: help sync dev test lint typecheck build up infra-up down ps logs db-check migration-check app-check logging-check health-check
 
 COMPOSE := docker compose --env-file backend/.env
 
@@ -8,10 +8,12 @@ help:
 	@echo "test       用隔离容器跑完整 pytest 测试"
 	@echo "lint       ruff 检查             [Step 10 之后可用]"
 	@echo "typecheck  mypy 检查             [Step 10 之后可用]"
-	@echo "up         起依赖服务            [Step 3 之后可用]"
-	@echo "down       停依赖服务"
-	@echo "ps         看依赖服务状态"
-	@echo "logs       看容器日志"
+	@echo "build      构建 backend/frontend 镜像"
+	@echo "up         构建并启动四服务全栈"
+	@echo "infra-up   只启动 PostgreSQL + Redis"
+	@echo "down       停止并移除容器（保留 named volumes）"
+	@echo "ps         看四服务状态"
+	@echo "logs       跟踪四服务日志"
 	@echo "db-check   验收 async 数据库基础设施"
 	@echo "migration-check  验收 Alembic revision、users schema 与零残留约束探针"
 	@echo "app-check  验收 FastAPI lifespan、路由前缀、OpenAPI 与 CORS"
@@ -33,7 +35,13 @@ lint:
 typecheck:
 	cd backend && uv run mypy app
 
+build:
+	$(COMPOSE) build backend frontend
+
 up:
+	$(COMPOSE) up -d --build --wait
+
+infra-up:
 	$(COMPOSE) up -d db redis
 
 down:
@@ -43,7 +51,7 @@ ps:
 	$(COMPOSE) ps
 
 logs:
-	$(COMPOSE) logs -f db redis
+	$(COMPOSE) logs -f
 
 db-check:
 	cd backend && uv run python scripts/check_db.py

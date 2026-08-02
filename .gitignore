@@ -16,10 +16,5 @@
 /data/
 /pgdata/
 
-# Stage 0 Step 11 再正式加入；当前只保留本地草稿
-/backend/.dockerignore
-/backend/Dockerfile
-/backend/docker-entrypoint.sh
-
 # 日志
 *.log

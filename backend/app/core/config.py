@@ -2,8 +2,9 @@ import os
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlsplit, urlunsplit
 
-from pydantic import Field
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 # app/core/config.py -> app/core -> app -> backend
@@ -46,12 +47,16 @@ class Settings(BaseSettings):
 
     # Database
     database_url: str
+    database_host_override: str | None = None
+    database_port_override: int | None = Field(default=None, ge=1, le=65535)
     db_pool_size: int = Field(default=5, ge=1)
     db_max_overflow: int = Field(default=5, ge=0)
     db_pool_timeout: float = Field(default=30.0, gt=0)
 
     # Redis
     redis_url: str
+    redis_host_override: str | None = None
+    redis_port_override: int | None = Field(default=None, ge=1, le=65535)
 
     # LLM
     llm_provider: str
@@ -74,6 +79,33 @@ class Settings(BaseSettings):
     chunk_method: str = "recursive"
     retrieval_top_k: int = 5
     similarity_threshold: float = 0.65
+
+    @model_validator(mode="after")
+    def apply_dependency_host_overrides(self) -> "Settings":
+        """Replace host-only development URLs when running on a container network."""
+
+        if self.database_host_override is not None:
+            self.database_url = _replace_url_host(
+                self.database_url,
+                self.database_host_override,
+                self.database_port_override or 5432,
+            )
+        if self.redis_host_override is not None:
+            self.redis_url = _replace_url_host(
+                self.redis_url,
+                self.redis_host_override,
+                self.redis_port_override or 6379,
+            )
+        return self
+
+
+def _replace_url_host(url: str, host: str, port: int) -> str:
+    """Preserve credentials/path/query while replacing one dependency endpoint."""
+
+    parts = urlsplit(url)
+    credentials, separator, _ = parts.netloc.rpartition("@")
+    prefix = f"{credentials}{separator}" if separator else ""
+    return urlunsplit(parts._replace(netloc=f"{prefix}{host}:{port}"))
 
 
 @lru_cache(maxsize=1)

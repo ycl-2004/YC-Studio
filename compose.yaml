@@ -41,6 +41,42 @@ services:
       retries: 10
       start_period: 5s
 
+  backend:
+    image: ycstudio-backend:local
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    env_file:
+      - ./backend/.env
+    environment:
+      YCSTUDIO_ENV_FILE: ""
+      DATABASE_HOST_OVERRIDE: db
+      DATABASE_PORT_OVERRIDE: "5432"
+      REDIS_HOST_OVERRIDE: redis
+      REDIS_PORT_OVERRIDE: "6379"
+      RUN_MIGRATIONS: "1"
+    ports:
+      - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  frontend:
+    image: ycstudio-frontend:local
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${FRONTEND_PORT:-5173}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+
 volumes:
   postgres_data:
   redis_data:
