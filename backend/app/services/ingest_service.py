@@ -134,6 +134,7 @@ async def ingest_document(
     *,
     file_path: Path | None = None,
     dir_path: str | None = None,
+    metadata: dict[str, str] | None = None,
     count_tokens: Callable[[str], int] | None = None,
 ) -> IngestResult:
     """Full ingestion pipeline: hash → dedup → parse → clean → chunk → embed → bulk insert.
@@ -150,6 +151,7 @@ async def ingest_document(
         file_bytes: Raw file content bytes.
         file_path: Optional on-disk path to parse instead of staging ``file_bytes``.
         dir_path: Optional directory path metadata for folder uploads.
+        metadata: User-confirmed document metadata from the upload form.
         count_tokens: Token counter for the chunker. Defaults to the embedding model's
             own tokenizer so chunk boundaries are measured in the units the encoder
             actually consumes.
@@ -206,6 +208,7 @@ async def ingest_document(
             filename=filename,
             file_bytes=file_bytes,
             file_path=file_path,
+            metadata=metadata,
             count_tokens=count_tokens,
             embedding_batch_size=settings.embedding_batch_size,
             insert_batch_size=settings.ingest_batch_size,
@@ -246,6 +249,7 @@ async def _run_pipeline(
     filename: str,
     file_bytes: bytes,
     file_path: Path | None,
+    metadata: dict[str, str] | None,
     count_tokens: Callable[[str], int] | None,
     embedding_batch_size: int,
     insert_batch_size: int,
@@ -264,7 +268,7 @@ async def _run_pipeline(
         source_id=source.id,
         title=parse_result.title,
         raw_text=cleaned_text,
-        meta=parse_result.meta,
+        meta={**parse_result.meta, **(metadata or {})},
         parser_version=parse_result.parser_version,
     )
     session.add(document)

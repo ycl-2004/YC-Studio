@@ -80,11 +80,14 @@ async def check_lifespan_routes_and_cors() -> None:
             openapi_response = await client.get("/openapi.json")
             assert openapi_response.status_code == 200
             paths = openapi_response.json()["paths"]
-            assert set(paths) == {"/health", "/ready", f"{settings.api_prefix}/"}
-            print(
-                "PASS OpenAPI exposes only /health, /ready, "
-                f"and the expected {settings.api_prefix}/ application route"
-            )
+            assert set(paths) == {
+                "/health",
+                "/ready",
+                f"{settings.api_prefix}/",
+                f"{settings.api_prefix}/kb/upload",
+                f"{settings.api_prefix}/kb/search",
+            }
+            print("PASS OpenAPI exposes health, API index, and knowledge-base routes")
 
             cors_response = await client.options(
                 f"{settings.api_prefix}/",
