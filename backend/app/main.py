@@ -6,10 +6,10 @@ References:
 - https://fastapi.tiangolo.com/tutorial/cors/
 """
 
-import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from redis.asyncio import Redis
@@ -17,9 +17,11 @@ from sqlalchemy import text
 
 from app.api import api_router
 from app.core.config import get_settings
+from app.core.logging import configure_logging
+from app.core.middleware import REQUEST_ID_HEADER, RequestContextMiddleware
 from app.db.session import engine
 
-logger = logging.getLogger("uvicorn.error")
+logger = structlog.stdlib.get_logger(__name__)
 
 
 @asynccontextmanager
@@ -58,6 +60,7 @@ def create_app() -> FastAPI:
     """Construct one configured application instance."""
 
     settings = get_settings()
+    configure_logging(settings.environment)
     application = FastAPI(
         title=settings.app_name,
         debug=settings.debug,
@@ -69,7 +72,9 @@ def create_app() -> FastAPI:
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
+        expose_headers=[REQUEST_ID_HEADER],
     )
+    application.add_middleware(RequestContextMiddleware)
     application.include_router(api_router, prefix=settings.api_prefix)
     return application
 

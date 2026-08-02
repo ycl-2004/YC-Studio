@@ -8,10 +8,12 @@ References:
 """
 
 import asyncio
+from uuid import UUID
 
 from httpx import ASGITransport, AsyncClient
 
 from app.core.config import get_settings
+from app.core.middleware import REQUEST_ID_HEADER
 from app.main import create_app
 
 
@@ -39,12 +41,25 @@ async def check_lifespan_routes_and_cors() -> None:
 
             docs_response = await client.get("/docs")
             assert docs_response.status_code == 200
-            print("PASS /docs is reachable")
+            UUID(docs_response.headers[REQUEST_ID_HEADER])
+            print("PASS /docs is reachable and returns a UUID request ID")
 
-            index_response = await client.get(f"{settings.api_prefix}/")
+            allowed_origin = settings.cors_origins[0]
+            index_response = await client.get(
+                f"{settings.api_prefix}/",
+                headers={"Origin": allowed_origin},
+            )
             assert index_response.status_code == 200
             assert index_response.json() == {"name": settings.app_name}
+            UUID(index_response.headers[REQUEST_ID_HEADER])
+            assert index_response.headers["access-control-allow-origin"] == allowed_origin
+            exposed_headers = {
+                header.strip().lower()
+                for header in index_response.headers["access-control-expose-headers"].split(",")
+            }
+            assert REQUEST_ID_HEADER.lower() in exposed_headers
             print(f"PASS {settings.api_prefix}/ is reachable through the aggregate router")
+            print("PASS CORS exposes X-Request-ID to browser clients")
 
             openapi_response = await client.get("/openapi.json")
             assert openapi_response.status_code == 200
@@ -54,7 +69,6 @@ async def check_lifespan_routes_and_cors() -> None:
                 f"PASS OpenAPI exposes only the expected {settings.api_prefix}/ application route"
             )
 
-            allowed_origin = settings.cors_origins[0]
             cors_response = await client.options(
                 f"{settings.api_prefix}/",
                 headers={
