@@ -1,5 +1,7 @@
 # YC Studio
 
+[![CI](https://github.com/ycl-2004/YC-Studio/actions/workflows/ci.yml/badge.svg)](https://github.com/ycl-2004/YC-Studio/actions/workflows/ci.yml)
+
 用户上传知识库驱动的内容生成工作台。
 
 上传参考资料建成四层分库 → 跟 Agent 聊出结构化选题卡 → 6 节点工作流生成文章 → 两处人审 → 导出 → 回填效果数据 → 高表现内容回流成新案例。
@@ -63,6 +65,13 @@ uv run uvicorn app.main:app --reload   # Step 6 之后可用
 `backend/.env`，也不会连接 `127.0.0.1:5433` 或 `127.0.0.1:6380` 的开发服务；只需保证
 Docker Engine 正在运行，不需要先执行 `make up`。每个测试结束后会回滚外层 transaction，
 即使被测代码调用了 `commit()`，也不会把测试 User 留到下一个测试。
+
+## 持续集成
+
+push 到 `main` 或创建面向 `main` 的 Pull Request 时，GitHub Actions 会在 Ubuntu runner 上
+启动独立的 pgvector/PostgreSQL 与 Redis service containers，然后执行锁定依赖同步、Ruff
+format/lint、mypy、pytest 和 Alembic drift check。CI 使用固定测试凭证和独立环境变量，不读取
+开发 `.env`，也不需要 GitHub repository secrets。
 
 应用运行后，GET /health 只检查进程存活；GET /ready 会实际检查 PostgreSQL
 与 Redis。依赖暂时不可用时，/ready 返回 503，但 /health 仍保持 200。

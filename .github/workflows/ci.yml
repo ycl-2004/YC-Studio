@@ -1,0 +1,89 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend quality gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    defaults:
+      run:
+        working-directory: backend
+
+    services:
+      postgres:
+        image: pgvector/pgvector:0.8.2-pg16
+        env:
+          POSTGRES_DB: ycstudio_test
+          POSTGRES_USER: ycstudio_test
+          POSTGRES_PASSWORD: ycstudio_test_password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ycstudio_test -d ycstudio_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+      redis:
+        image: redis:7.4.10-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    env:
+      YCSTUDIO_ENV_FILE: ""
+      ENVIRONMENT: test
+      DATABASE_URL: postgresql+asyncpg://ycstudio_test:ycstudio_test_password@127.0.0.1:5432/ycstudio_test
+      REDIS_URL: redis://127.0.0.1:6379/0
+      YCSTUDIO_TEST_DATABASE_URL: postgresql+asyncpg://ycstudio_test:ycstudio_test_password@127.0.0.1:5432/ycstudio_test
+      YCSTUDIO_TEST_REDIS_URL: redis://127.0.0.1:6379/0
+      LLM_PROVIDER: test
+      LLM_API_KEY: test-not-a-real-secret
+      LLM_MODEL: test-model
+      LLM_BASE_URL: http://127.0.0.1
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Install uv and Python 3.12
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          python-version: "3.12"
+          enable-cache: true
+
+      - name: Sync locked dependencies
+        run: uv sync --locked --all-groups
+
+      - name: Check formatting
+        run: uv run ruff format --check .
+
+      - name: Lint
+        run: uv run ruff check .
+
+      - name: Type check
+        run: uv run mypy app tests
+
+      - name: Test
+        run: uv run pytest -ra
+
+      - name: Check migration drift
+        run: uv run alembic check

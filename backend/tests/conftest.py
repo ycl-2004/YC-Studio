@@ -1,7 +1,7 @@
 """Shared fixtures for isolated application and database tests.
 
-The test process disables backend/.env before any app import. Testcontainers then
-supplies short-lived PostgreSQL/pgvector and Redis URLs through environment variables.
+The test process disables backend/.env before any app import. Local runs use
+Testcontainers; CI can explicitly supply a matched pair of service-container URLs.
 
 References:
 - https://docs.sqlalchemy.org/en/20/orm/session_api.html#sqlalchemy.orm.Session.params.join_transaction_mode
@@ -32,6 +32,8 @@ os.environ["YCSTUDIO_ENV_FILE"] = ""
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 POSTGRES_IMAGE = "pgvector/pgvector:0.8.2-pg16"
 REDIS_IMAGE = "redis:7.4.10-alpine"
+TEST_DATABASE_URL_VARIABLE = "YCSTUDIO_TEST_DATABASE_URL"
+TEST_REDIS_URL_VARIABLE = "YCSTUDIO_TEST_REDIS_URL"
 
 
 @dataclass(frozen=True)
@@ -50,33 +52,60 @@ def _run_migrations() -> None:
     command.upgrade(alembic_config, "head")
 
 
+def _external_service_urls() -> TestInfrastructure | None:
+    """Return explicit CI service URLs, rejecting a partially configured pair."""
+
+    database_url = os.getenv(TEST_DATABASE_URL_VARIABLE)
+    redis_url = os.getenv(TEST_REDIS_URL_VARIABLE)
+
+    if bool(database_url) != bool(redis_url):
+        raise RuntimeError(
+            f"{TEST_DATABASE_URL_VARIABLE} and {TEST_REDIS_URL_VARIABLE} must be set together"
+        )
+
+    if database_url and redis_url:
+        return TestInfrastructure(database_url=database_url, redis_url=redis_url)
+
+    return None
+
+
 @pytest.fixture(scope="session")
 def test_infrastructure() -> Iterator[TestInfrastructure]:
-    """Start isolated dependencies once, configure Settings, and apply migrations."""
+    """Configure isolated CI services or start local containers, then migrate."""
 
-    postgres = PostgresContainer(
-        image=POSTGRES_IMAGE,
-        username="ycstudio_test",
-        password="ycstudio_test_password",
-        dbname="ycstudio_test",
-        driver=None,
-    )
-    redis = RedisContainer(image=REDIS_IMAGE)
+    external_services = _external_service_urls()
+    postgres: PostgresContainer | None = None
+    redis: RedisContainer | None = None
 
-    postgres.start()
-    try:
-        redis.start()
-    except Exception:
-        postgres.stop()
-        raise
+    if external_services is None:
+        postgres = PostgresContainer(
+            image=POSTGRES_IMAGE,
+            username="ycstudio_test",
+            password="ycstudio_test_password",
+            dbname="ycstudio_test",
+            driver=None,
+        )
+        redis = RedisContainer(image=REDIS_IMAGE)
 
-    database_url = postgres.get_connection_url(driver="asyncpg")
-    redis_url = f"redis://{redis.get_container_host_ip()}:{redis.get_exposed_port(6379)}/0"
+        postgres.start()
+        try:
+            redis.start()
+        except Exception:
+            postgres.stop()
+            raise
+
+        infrastructure = TestInfrastructure(
+            database_url=postgres.get_connection_url(driver="asyncpg"),
+            redis_url=(f"redis://{redis.get_container_host_ip()}:{redis.get_exposed_port(6379)}/0"),
+        )
+    else:
+        infrastructure = external_services
+
     test_environment = {
         "ENVIRONMENT": "test",
         "DEBUG": "false",
-        "DATABASE_URL": database_url,
-        "REDIS_URL": redis_url,
+        "DATABASE_URL": infrastructure.database_url,
+        "REDIS_URL": infrastructure.redis_url,
         "LLM_PROVIDER": "test",
         "LLM_API_KEY": "test-not-a-real-secret",
         "LLM_MODEL": "test-model",
@@ -87,15 +116,17 @@ def test_infrastructure() -> Iterator[TestInfrastructure]:
 
     try:
         _run_migrations()
-        yield TestInfrastructure(database_url=database_url, redis_url=redis_url)
+        yield infrastructure
     finally:
         for name, previous_value in previous_environment.items():
             if previous_value is None:
                 os.environ.pop(name, None)
             else:
                 os.environ[name] = previous_value
-        redis.stop()
-        postgres.stop()
+        if redis is not None:
+            redis.stop()
+        if postgres is not None:
+            postgres.stop()
 
 
 @pytest.fixture
