@@ -70,7 +70,8 @@ class Settings(BaseSettings):
     embedding_provider: str = "huggingface"
     embedding_model: str = "BAAI/bge-base-zh-v1.5"
     embedding_dimension: int = 768
-    embedding_device: str = "cpu"
+    embedding_device: str = "auto"
+    embedding_batch_size: int = Field(default=32, ge=1, le=1024)
     embedding_local_files_only: bool = True
 
     # RAG
