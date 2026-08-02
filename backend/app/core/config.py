@@ -75,11 +75,18 @@ class Settings(BaseSettings):
     embedding_local_files_only: bool = True
 
     # RAG
-    chunk_size: int = 800
-    chunk_overlap: int = 120
+    # Counted with the embedding model's own tokenizer, special tokens included — not
+    # characters. Ingestion caps this at the model's own max input length, so a value
+    # larger than the encoder's window is corrected with a warning rather than silently
+    # truncated. 512 matches bge-base-zh-v1.5 exactly; overlap is the usual 10%.
+    chunk_size: int = 512
+    chunk_overlap: int = 51
     chunk_method: str = "recursive"
     retrieval_top_k: int = 5
     similarity_threshold: float = 0.65
+
+    # Ingestion
+    ingest_batch_size: int = Field(default=200, ge=1, le=1000)
 
     @model_validator(mode="after")
     def apply_dependency_host_overrides(self) -> "Settings":

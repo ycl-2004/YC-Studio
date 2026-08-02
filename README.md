@@ -15,7 +15,7 @@
 | Stage | 状态 |
 |:-:|---|
 | 0 地基与可观测 | ✅ Step 1–11 本地实现与验收完成（Step 11 待提交） |
-| 1 知识库摄取与四层分库 | 🟨 Step 1–4 已完成；Step 5 代码完成、待 Step 7 入库验收 |
+| 1 知识库摄取与四层分库 | 🟨 Step 1–6 已完成；Step 7 代码与隔离库验证完成，待真实数据索引基准 |
 | 2–11 | ⬜ 未开始 |
 
 ## 结构
@@ -49,6 +49,20 @@ make down                  # 停止并删除容器，保留数据卷
 
 也可以直接运行 `docker compose --env-file backend/.env up --build` 在前台查看启动过程。Backend 启动前会自动执行
 `alembic upgrade head`，db/Redis healthy 后才启动 backend，backend healthy 后才启动 frontend。
+
+已有开发数据卷在拉取到新 migration 后，运行 `make up` 会重建 backend 镜像并在启动时自动升级到
+Alembic head。先用下面的命令确认当前 revision；重要数据应在 schema 更新前自行备份：
+
+```bash
+docker compose --env-file backend/.env exec backend alembic current
+```
+
+migration 会先创建检索索引。数据库批量导入真实 chunks 后，再运行一次索引重建与延迟基线测试，
+让 HNSW 图基于真实向量生成：
+
+```bash
+docker compose --env-file backend/.env exec backend python scripts/build_indexes.py
+```
 
 Frontend、API、PostgreSQL、Redis 分别绑定在 `127.0.0.1:5173`、`127.0.0.1:8000`、
 `127.0.0.1:5433`、`127.0.0.1:6380`。数据保存在 Docker

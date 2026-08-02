@@ -29,6 +29,19 @@ from testcontainers.community.redis import RedisContainer
 # SettingsConfigDict(env_file=None), not "look for a dotenv file elsewhere".
 os.environ["YCSTUDIO_ENV_FILE"] = ""
 
+# Unit tests instantiate Settings without any infrastructure. Placeholders keep the
+# required fields satisfiable; tests that need real services take the fixtures below,
+# which overwrite these with live container URLs.
+for _name, _placeholder in {
+    "DATABASE_URL": "postgresql+asyncpg://placeholder:placeholder@127.0.0.1:5432/placeholder",
+    "REDIS_URL": "redis://127.0.0.1:6379/0",
+    "LLM_PROVIDER": "test",
+    "LLM_API_KEY": "test-not-a-real-secret",
+    "LLM_MODEL": "test-model",
+    "LLM_BASE_URL": "http://127.0.0.1",
+}.items():
+    os.environ.setdefault(_name, _placeholder)
+
 BACKEND_DIR = Path(__file__).resolve().parents[1]
 POSTGRES_IMAGE = "pgvector/pgvector:0.8.2-pg16"
 REDIS_IMAGE = "redis:7.4.10-alpine"

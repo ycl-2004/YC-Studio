@@ -35,5 +35,6 @@ logs/
 
 # runtime 镜像不需要的开发内容
 tests/
-scripts/
+scripts/*
+!scripts/build_indexes.py
 seeds/
