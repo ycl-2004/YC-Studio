@@ -32,6 +32,8 @@ COPY --chown=app:app app /app/app
 COPY --chown=app:app alembic.ini /app/alembic.ini
 COPY --chown=app:app migrations /app/migrations
 COPY --chown=app:app scripts/build_indexes.py /app/scripts/build_indexes.py
+COPY --chown=app:app scripts/seed_public_libraries.py /app/scripts/seed_public_libraries.py
+COPY --chown=app:app seeds /app/seeds
 COPY --chown=app:app docker-entrypoint.sh /app/docker-entrypoint.sh
 
 RUN chmod +x /app/docker-entrypoint.sh \

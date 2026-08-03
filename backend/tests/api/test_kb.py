@@ -72,6 +72,15 @@ async def _user(session: AsyncSession, label: str) -> User:
 
 
 def _install_fake_ingest_embedding(monkeypatch: MonkeyPatch) -> None:
+    """Stub every module-level ``get_local_embedding`` import, not just one.
+
+    ``ingest_service`` and ``kb_service`` each did ``from ... import get_local_embedding``,
+    so each holds its own name bound to the real function; patching one leaves the other
+    untouched. A test that only patches ingest_service and then calls the search endpoint
+    hits the real model loader — which works by accident on a machine with the model
+    cached and fails with an unhandled 500 anywhere else, CI included.
+    """
+
     fake_embedding = FakeEmbedding()
     monkeypatch.setattr(
         "app.services.ingest_service.get_local_embedding",
@@ -80,6 +89,10 @@ def _install_fake_ingest_embedding(monkeypatch: MonkeyPatch) -> None:
     monkeypatch.setattr(
         "app.services.ingest_service.encode_texts",
         lambda texts, **_: [_vector(1.0) for _ in texts],
+    )
+    monkeypatch.setattr(
+        "app.services.kb_service.get_local_embedding",
+        lambda: fake_embedding,
     )
 
 

@@ -15,7 +15,7 @@
 | Stage | 状态 |
 |:-:|---|
 | 0 地基与可观测 | ✅ Step 1–11 本地实现与验收完成（Step 11 待提交） |
-| 1 知识库摄取与四层分库 | 🟨 Step 1–10 已完成；Step 7 待真实数据索引基准；Step 11–12 未开始 |
+| 1 知识库摄取与四层分库 | 🟨 Step 1–11 已完成；Step 7 待真实数据索引基准；Step 12 未开始 |
 | 2–11 | ⬜ 未开始 |
 
 ## 结构
@@ -112,6 +112,11 @@ Stage 1 的接口包括同步单文件摄取 `POST /api/kb/upload`、异步批�
 `POST /api/kb/batch-upload`（通过 ARQ worker 逐个处理）及其进度查询
 `GET /api/kb/batches/{batch_id}`、检索 `POST /api/kb/search`。当前都以 `X-User-ID`
 作为临时身份边界来执行私有库权限；Stage 4 会将其替换为已验证的登录身份。
+
+公共规则库与模板库位于 `backend/seeds/rules/`、`backend/seeds/templates/`，可通过
+`make seed-public` 初始化或同步。它按 `(库类型, 相对 Markdown 路径, 内容 hash)` 幂等：不变内容
+跳过，变更文件只重建自身的派生 document/chunk。容器默认不执行；设置
+`SEED_PUBLIC_LIBRARIES=1` 后，backend 会在迁移完成、启动服务前同步一次。公共库不接受上传 API 写入。
 
 ## Python 版本说明
 

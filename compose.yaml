@@ -57,6 +57,7 @@ services:
       REDIS_HOST_OVERRIDE: redis
       REDIS_PORT_OVERRIDE: "6379"
       RUN_MIGRATIONS: "1"
+      SEED_PUBLIC_LIBRARIES: ${SEED_PUBLIC_LIBRARIES:-0}
     ports:
       - "127.0.0.1:${BACKEND_PORT:-8000}:8000"
     depends_on:
@@ -83,6 +84,7 @@ services:
       REDIS_HOST_OVERRIDE: redis
       REDIS_PORT_OVERRIDE: "6379"
       RUN_MIGRATIONS: "0"
+      SEED_PUBLIC_LIBRARIES: "0"
     command: ["arq", "app.tasks.worker.WorkerSettings"]
     # The image's HEALTHCHECK curls :8000/health, which only the backend service
     # serves. ARQ has no HTTP endpoint, so that probe would always fail here and

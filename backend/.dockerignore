@@ -37,4 +37,7 @@ logs/
 tests/
 scripts/*
 !scripts/build_indexes.py
+!scripts/seed_public_libraries.py
 seeds/
+!seeds/
+!seeds/**

@@ -1,4 +1,4 @@
-.PHONY: help sync dev test lint typecheck build up infra-up down ps logs db-check migration-check app-check logging-check health-check
+.PHONY: help sync dev test lint typecheck build up infra-up down ps logs db-check migration-check app-check logging-check health-check seed-public
 
 COMPOSE := docker compose --env-file backend/.env
 
@@ -19,6 +19,7 @@ help:
 	@echo "app-check  验收 FastAPI lifespan、路由前缀、OpenAPI 与 CORS"
 	@echo "logging-check  验收 request_id、生产 JSON、Uvicorn/SQLAlchemy 与异常日志"
 	@echo "health-check  验收 liveness、readiness、数据库故障与自动恢复"
+	@echo "seed-public  初始化或同步版本化公共规则库与模板库"
 
 sync:
 	cd backend && uv sync
@@ -67,3 +68,6 @@ logging-check:
 
 health-check:
 	cd backend && uv run python scripts/check_health.py
+
+seed-public:
+	cd backend && uv run python scripts/seed_public_libraries.py

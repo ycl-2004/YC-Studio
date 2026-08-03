@@ -341,17 +341,28 @@ async def _run_pipeline(
     source.ingest_status = IngestStatus.CHUNKING
     await session.flush()
 
-    embedding = get_local_embedding()
-    effective_max_tokens, effective_overlap = _fit_chunk_budget(
-        max_tokens,
-        overlap_tokens,
-        embedding.max_input_tokens,
-    )
-    chunker = TextChunker(
-        count_tokens if count_tokens is not None else embedding.count_tokens,
-        max_tokens=effective_max_tokens,
-        overlap_tokens=effective_overlap,
-    )
+    if _is_whole_document_kind(collection.kind):
+        # Whole-document libraries are never embedded, so loading the embedding model merely
+        # to count a non-searchable row makes the public seed command depend on an ML cache.
+        # The stored count is informational; a caller may still supply an exact counter.
+        chunker = TextChunker(
+            count_tokens if count_tokens is not None else len,
+            max_tokens=max_tokens,
+            overlap_tokens=overlap_tokens,
+        )
+        embedding = None
+    else:
+        embedding = get_local_embedding()
+        effective_max_tokens, effective_overlap = _fit_chunk_budget(
+            max_tokens,
+            overlap_tokens,
+            embedding.max_input_tokens,
+        )
+        chunker = TextChunker(
+            count_tokens if count_tokens is not None else embedding.count_tokens,
+            max_tokens=effective_max_tokens,
+            overlap_tokens=effective_overlap,
+        )
     chunk_data_list = chunk_for_collection(cleaned_text, collection.kind, chunker)
 
     if not chunk_data_list:
@@ -391,6 +402,8 @@ async def _run_pipeline(
                 batch_size=embedding_batch_size,
             )
         )
+        if embedding is None:  # pragma: no cover - guarded by the collection-kind branch above.
+            raise RuntimeError("Searchable collections require an embedding model")
         embed_model = embedding.embed_model
         embed_version = embedding.embed_version
 
