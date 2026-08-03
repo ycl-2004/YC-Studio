@@ -6,11 +6,14 @@ query vectors are normalized, so ``1 - distance / 2`` maps cosine similarity fro
 """
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from pathlib import PurePosixPath
 from uuid import UUID
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import ColumnElement, delete, func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import InstrumentedAttribute
 
 from app.db.models.chunk import Chunk
 from app.db.models.collection import Collection, CollectionKind, CollectionScope
@@ -291,3 +294,295 @@ def _cosine_distance_to_score(distance: float) -> float:
     """Convert cosine distance in [0, 2] into monotonic API similarity in [0, 1]."""
 
     return min(1.0, max(0.0, 1.0 - distance / 2.0))
+
+
+class CollectionAlreadyExistsError(ValueError):
+    """A private collection with the same (owner, kind, name) already exists."""
+
+
+class SourceNotFoundError(LookupError):
+    """The requested source does not exist."""
+
+
+@dataclass(frozen=True, slots=True)
+class CollectionView:
+    """A collection plus the live counts the management UI needs to render tabs."""
+
+    id: UUID
+    kind: CollectionKind
+    scope: CollectionScope
+    name: str
+    source_count: int
+    document_count: int
+    chunk_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class SourceView:
+    """An uploaded source (document) with its derived document and chunk counts."""
+
+    source_id: UUID
+    filename: str
+    ingest_status: IngestStatus
+    dir_path: str | None
+    created_at: datetime
+    document_id: UUID | None
+    title: str | None
+    chunk_count: int
+
+
+async def list_collections(
+    session: AsyncSession,
+    *,
+    current_user_id: UUID,
+    kind: CollectionKind | None = None,
+) -> list[CollectionView]:
+    """Return public collections and the user's private ones, with live counts."""
+
+    statement = (
+        select(Collection)
+        .where(
+            or_(
+                Collection.scope == CollectionScope.PUBLIC,
+                Collection.user_id == current_user_id,
+            )
+        )
+        .order_by(Collection.kind, Collection.name)
+    )
+    if kind is not None:
+        statement = statement.where(Collection.kind == kind)
+    collections = (await session.execute(statement)).scalars().all()
+    if not collections:
+        return []
+
+    ids = [collection.id for collection in collections]
+    source_counts = await _count_by_collection_column(
+        session, Source.collection_id, Source.deleted_at.is_(None), ids
+    )
+    document_counts = await _count_documents_by_collection(session, ids)
+    chunk_counts = await _count_chunks_by_collection(session, ids)
+
+    return [
+        CollectionView(
+            collection.id,
+            collection.kind,
+            collection.scope,
+            collection.name,
+            source_counts.get(collection.id, 0),
+            document_counts.get(collection.id, 0),
+            chunk_counts.get(collection.id, 0),
+        )
+        for collection in collections
+    ]
+
+
+async def create_private_collection(
+    session: AsyncSession,
+    *,
+    current_user_id: UUID,
+    kind: CollectionKind,
+    name: str,
+) -> Collection:
+    """Create a private collection owned by the current user.
+
+    The unique constraint ``uq_kb_collections_owner_kind_name`` (with
+    ``nulls_not_distinct``) blocks a duplicate; surface it as a clean error rather
+    than letting the raw IntegrityError escape to a 500.
+    """
+
+    collection = Collection(
+        user_id=current_user_id,
+        kind=kind,
+        scope=CollectionScope.PRIVATE,
+        name=name,
+    )
+    session.add(collection)
+    try:
+        await session.flush()
+    except IntegrityError as error:
+        await session.rollback()
+        raise CollectionAlreadyExistsError(
+            f"A private {kind.value} collection named {name!r} already exists"
+        ) from error
+    return collection
+
+
+async def get_collection(
+    session: AsyncSession,
+    *,
+    collection_id: UUID,
+) -> Collection | None:
+    """Return the collection row or ``None`` if it does not exist."""
+
+    return await session.get(Collection, collection_id)
+
+
+async def list_sources(
+    session: AsyncSession,
+    *,
+    current_user_id: UUID,
+    collection_id: UUID,
+) -> list[SourceView]:
+    """List uploaded sources in a visible collection with document and chunk counts."""
+
+    collection = await session.get(Collection, collection_id)
+    if collection is None:
+        raise CollectionNotFoundError(f"Collection {collection_id} was not found")
+    if collection.scope is not CollectionScope.PUBLIC and collection.user_id != current_user_id:
+        raise CollectionAccessError("Only the owner may view this collection")
+
+    sources = (
+        (
+            await session.execute(
+                select(Source)
+                .where(Source.collection_id == collection_id, Source.deleted_at.is_(None))
+                .order_by(Source.created_at.desc())
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    source_ids = [source.id for source in sources]
+    documents = (
+        (await session.execute(select(Document).where(Document.source_id.in_(source_ids))))
+        .scalars()
+        .all()
+        if source_ids
+        else []
+    )
+    document_by_source = {document.source_id: document for document in documents}
+
+    chunk_counts: dict[UUID, int] = {}
+    document_ids = [document.id for document in documents]
+    if document_ids:
+        rows = await session.execute(
+            select(Chunk.document_id, func.count())
+            .where(Chunk.document_id.in_(document_ids))
+            .group_by(Chunk.document_id)
+        )
+        chunk_counts = {document_id: int(count) for document_id, count in rows}
+
+    return [
+        SourceView(
+            source.id,
+            source.filename,
+            source.ingest_status,
+            source.dir_path,
+            source.created_at,
+            document_by_source[source.id].id if source.id in document_by_source else None,
+            document_by_source[source.id].title if source.id in document_by_source else None,
+            chunk_counts.get(document_by_source[source.id].id, 0)
+            if source.id in document_by_source
+            else 0,
+        )
+        for source in sources
+    ]
+
+
+async def delete_source(
+    session: AsyncSession,
+    *,
+    current_user_id: UUID,
+    source_id: UUID,
+) -> None:
+    """Soft-delete one uploaded source and remove its chunks from retrieval.
+
+    The source and its documents are soft-deleted (kept for audit); their chunks are
+    hard-deleted because generated content still references the documents, but chunks
+    only ever live inside an un-deleted document. After this, the chunks are gone and
+    the soft-deleted documents are excluded by the search filter either way.
+    """
+
+    source = await session.get(Source, source_id)
+    if source is None:
+        raise SourceNotFoundError(f"Source {source_id} was not found")
+
+    collection = await session.get(Collection, source.collection_id)
+    if (
+        collection is None
+        or collection.scope is CollectionScope.PUBLIC
+        or collection.user_id != current_user_id
+    ):
+        raise CollectionAccessError("Only the owner may delete from a private collection")
+
+    documents = (
+        (await session.execute(select(Document).where(Document.source_id == source_id)))
+        .scalars()
+        .all()
+    )
+    document_ids = [document.id for document in documents]
+    if document_ids:
+        await session.execute(delete(Chunk).where(Chunk.document_id.in_(document_ids)))
+
+    now = datetime.now(UTC)
+    for document in documents:
+        document.deleted_at = now
+    source.deleted_at = now
+    await session.commit()
+
+
+async def delete_collection(
+    session: AsyncSession,
+    *,
+    current_user_id: UUID,
+    collection_id: UUID,
+) -> None:
+    """Hard-delete a private collection; cascade removes sources, documents and chunks."""
+
+    collection = await session.get(Collection, collection_id)
+    if collection is None:
+        raise CollectionNotFoundError(f"Collection {collection_id} was not found")
+    if collection.scope is not CollectionScope.PRIVATE or collection.user_id != current_user_id:
+        raise CollectionAccessError("Only the owner may delete a private collection")
+
+    await session.execute(delete(Collection).where(Collection.id == collection_id))
+    await session.commit()
+
+
+async def _count_by_collection_column(
+    session: AsyncSession,
+    column: InstrumentedAttribute[UUID],
+    extra_filter: ColumnElement[bool],
+    collection_ids: list[UUID],
+) -> dict[UUID, int]:
+    """Group a countable column by ``collection_id`` for the given collections."""
+
+    rows = await session.execute(
+        select(column, func.count())
+        .where(column.in_(collection_ids), extra_filter)
+        .group_by(column)
+    )
+    return {collection_id: int(count) for collection_id, count in rows}
+
+
+async def _count_documents_by_collection(
+    session: AsyncSession,
+    collection_ids: list[UUID],
+) -> dict[UUID, int]:
+    """Count non-deleted documents per collection via their source."""
+
+    rows = await session.execute(
+        select(Source.collection_id, func.count())
+        .join(Document, Document.source_id == Source.id)
+        .where(Source.collection_id.in_(collection_ids), Source.deleted_at.is_(None))
+        .group_by(Source.collection_id)
+    )
+    return {collection_id: int(count) for collection_id, count in rows}
+
+
+async def _count_chunks_by_collection(
+    session: AsyncSession,
+    collection_ids: list[UUID],
+) -> dict[UUID, int]:
+    """Count chunks per collection, joining chunks through documents and sources."""
+
+    rows = await session.execute(
+        select(Source.collection_id, func.count())
+        .select_from(Chunk)
+        .join(Document, Chunk.document_id == Document.id)
+        .join(Source, Document.source_id == Source.id)
+        .where(Source.collection_id.in_(collection_ids), Source.deleted_at.is_(None))
+        .group_by(Source.collection_id)
+    )
+    return {collection_id: int(count) for collection_id, count in rows}

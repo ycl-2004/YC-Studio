@@ -401,3 +401,246 @@ async def test_search_returns_provenance_applies_metadata_and_rejects_rules(
     )
     assert unsupported.status_code == 422
     assert "not searchable" in unsupported.json()["detail"]
+
+
+async def test_list_collections_shows_public_and_private(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    user = await _user(db_session, "owner")
+    private = await _private_collection(db_session, owner_id=user.id, kind=CollectionKind.CASE)
+    public = Collection(
+        user_id=None,
+        kind=CollectionKind.RULE,
+        scope=CollectionScope.PUBLIC,
+        name=f"rules-{uuid4().hex}",
+    )
+    db_session.add(public)
+    await db_session.flush()
+
+    response = await client.get("/api/kb/collections", headers={"X-User-ID": str(user.id)})
+
+    assert response.status_code == 200, response.text
+    bodies = response.json()["collections"]
+    ids = {collection["id"] for collection in bodies}
+    assert str(private.id) in ids
+    assert str(public.id) in ids
+    mine = next(c for c in bodies if c["id"] == str(private.id))
+    assert mine["scope"] == "private"
+    assert mine["source_count"] == 0
+    assert mine["document_count"] == 0
+    assert mine["chunk_count"] == 0
+
+
+async def test_list_collections_filters_by_kind(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    user = await _user(db_session, "owner")
+    await _private_collection(db_session, owner_id=user.id, kind=CollectionKind.CASE)
+    await _private_collection(db_session, owner_id=user.id, kind=CollectionKind.MATERIAL)
+
+    response = await client.get(
+        "/api/kb/collections",
+        params={"kind": "material"},
+        headers={"X-User-ID": str(user.id)},
+    )
+
+    assert response.status_code == 200, response.text
+    bodies = response.json()["collections"]
+    assert len(bodies) == 1
+    assert bodies[0]["kind"] == "material"
+
+
+async def test_create_collection_appears_in_list(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    user = await _user(db_session, "owner")
+    payload = {"kind": "material", "name": "我的素材库"}
+
+    created = await client.post(
+        "/api/kb/collections", json=payload, headers={"X-User-ID": str(user.id)}
+    )
+    assert created.status_code == 201, created.text
+    body = created.json()
+    assert body["scope"] == "private"
+    assert body["name"] == "我的素材库"
+    assert body["user_id"] == str(user.id)
+
+    listed = await client.get("/api/kb/collections", headers={"X-User-ID": str(user.id)})
+    assert listed.status_code == 200
+    assert any(c["id"] == body["id"] for c in listed.json()["collections"])
+
+
+async def test_create_collection_rejects_duplicate(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    user = await _user(db_session, "owner")
+    payload = {"kind": "material", "name": "dup"}
+
+    first = await client.post(
+        "/api/kb/collections", json=payload, headers={"X-User-ID": str(user.id)}
+    )
+    assert first.status_code == 201, first.text
+    second = await client.post(
+        "/api/kb/collections", json=payload, headers={"X-User-ID": str(user.id)}
+    )
+    assert second.status_code == 409
+    assert "already exists" in second.json()["detail"]
+
+
+async def test_list_sources_shows_ingested_document(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    _install_fake_ingest_embedding(monkeypatch)
+    user = await _user(db_session, "owner")
+    collection = await _private_collection(
+        db_session, owner_id=user.id, kind=CollectionKind.MATERIAL
+    )
+    upload = await client.post(
+        "/api/kb/upload",
+        files={"file": ("ideas.md", b"# Idea\n\nThe content is ingested.", "text/markdown")},
+        data={
+            "collection_id": str(collection.id),
+            "kind": "material",
+            "platform": "general",
+            "content_type": "tutorial",
+        },
+        headers={"X-User-ID": str(user.id)},
+    )
+    assert upload.status_code == 201, upload.text
+
+    response = await client.get(
+        f"/api/kb/collections/{collection.id}/sources",
+        headers={"X-User-ID": str(user.id)},
+    )
+    assert response.status_code == 200, response.text
+    sources = response.json()["sources"]
+    assert len(sources) == 1
+    assert sources[0]["filename"] == "ideas.md"
+    assert sources[0]["ingest_status"] == "completed"
+    assert sources[0]["chunk_count"] == 1
+    assert sources[0]["title"] is not None
+
+
+async def test_list_sources_rejects_other_private_collection(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    owner = await _user(db_session, "owner")
+    stranger = await _user(db_session, "stranger")
+    collection = await _private_collection(db_session, owner_id=owner.id)
+
+    response = await client.get(
+        f"/api/kb/collections/{collection.id}/sources",
+        headers={"X-User-ID": str(stranger.id)},
+    )
+    assert response.status_code == 403
+    assert "Only the owner" in response.json()["detail"]
+
+
+async def test_list_sources_404_for_missing_collection(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    user = await _user(db_session, "searcher")
+    response = await client.get(
+        f"/api/kb/collections/{uuid4()}/sources",
+        headers={"X-User-ID": str(user.id)},
+    )
+    assert response.status_code == 404
+
+
+async def test_delete_source_removes_chunk_and_excludes_from_search(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    fake_embedding = FakeEmbedding()
+    monkeypatch.setattr("app.services.kb_service.get_local_embedding", lambda: fake_embedding)
+    user = await _user(db_session, "owner")
+    collection = await _private_collection(db_session, owner_id=user.id, kind=CollectionKind.CASE)
+    source = Source(
+        collection_id=collection.id,
+        filename="case.md",
+        content_hash="a" * 64,
+        ingest_status=IngestStatus.COMPLETED,
+    )
+    db_session.add(source)
+    await db_session.flush()
+    document = Document(
+        source_id=source.id,
+        title="Case document",
+        raw_text="Matched text",
+        meta={"platform": "xiaohongshu"},
+        parser_version="test",
+    )
+    db_session.add(document)
+    await db_session.flush()
+    db_session.add(
+        Chunk(
+            collection_id=collection.id,
+            document_id=document.id,
+            ordinal=0,
+            text="The closest chunk",
+            token_count=3,
+            embedding=_vector(1.0),
+            embed_model="test",
+            embed_version="test",
+        )
+    )
+    await db_session.flush()
+
+    before = await client.post(
+        "/api/kb/search",
+        json={"query": "closest", "kind": "case", "top_k": 5},
+        headers={"X-User-ID": str(user.id)},
+    )
+    assert before.status_code == 200, before.text
+    assert len(before.json()["results"]) == 1
+
+    deleted = await client.delete(
+        f"/api/kb/sources/{source.id}", headers={"X-User-ID": str(user.id)}
+    )
+    assert deleted.status_code == 204
+
+    after = await client.post(
+        "/api/kb/search",
+        json={"query": "closest", "kind": "case", "top_k": 5},
+        headers={"X-User-ID": str(user.id)},
+    )
+    assert after.status_code == 200, after.text
+    assert len(after.json()["results"]) == 0
+
+
+async def test_delete_source_rejects_public_collection(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    user = await _user(db_session, "writer")
+    public = Collection(
+        user_id=None,
+        kind=CollectionKind.MATERIAL,
+        scope=CollectionScope.PUBLIC,
+        name=f"public-{uuid4().hex}",
+    )
+    db_session.add(public)
+    await db_session.flush()
+    source = Source(
+        collection_id=public.id,
+        filename="p.md",
+        content_hash="b" * 64,
+        ingest_status=IngestStatus.COMPLETED,
+    )
+    db_session.add(source)
+    await db_session.flush()
+
+    response = await client.delete(
+        f"/api/kb/sources/{source.id}", headers={"X-User-ID": str(user.id)}
+    )
+    assert response.status_code == 403
+    assert "Only the owner" in response.json()["detail"]

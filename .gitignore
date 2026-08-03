@@ -12,6 +12,7 @@
 .fable/
 .fable
 Documents
+.workbuddy
 
 # Docker volume 挂载的本地数据
 /data/

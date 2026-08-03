@@ -110,7 +110,13 @@ format/lint、mypy、pytest 和 Alembic drift check。CI 使用固定测试凭�
 
 Stage 1 的接口包括同步单文件摄取 `POST /api/kb/upload`、异步批量摄取
 `POST /api/kb/batch-upload`（通过 ARQ worker 逐个处理）及其进度查询
-`GET /api/kb/batches/{batch_id}`、检索 `POST /api/kb/search`。当前都以 `X-User-ID`
+`GET /api/kb/batches/{batch_id}`、检索 `POST /api/kb/search`。为支持 Step 12
+知识库管理页，另补充了库与文档的枚举/删除能力：`GET /api/kb/collections`
+（列举可见库，可选 `?kind=` 过滤，带实时 source/document/chunk 计数）、
+`POST /api/kb/collections`（创建当前用户私有库）、`GET /api/kb/collections/{id}`
+（单库元数据）、`GET /api/kb/collections/{id}/sources`（列举该库文档与 ingest 状态）、
+`DELETE /api/kb/sources/{source_id}`（软删文档 + 级联清 chunk）、
+`DELETE /api/kb/collections/{id}`（删私有库，级联清全部数据）。当前都以 `X-User-ID`
 作为临时身份边界来执行私有库权限；Stage 4 会将其替换为已验证的登录身份。
 
 公共规则库与模板库位于 `backend/seeds/rules/`、`backend/seeds/templates/`，可通过

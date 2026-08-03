@@ -11,34 +11,48 @@ from uuid import UUID
 
 from arq import create_pool
 from arq.connections import RedisSettings
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapters.storage import LocalUploadStorage
 from app.api.deps import get_current_user_id
 from app.core.config import get_settings
-from app.db.models.collection import CollectionKind
+from app.db.models.collection import CollectionKind, CollectionScope
 from app.db.session import get_session
 from app.rag.parsers.factory import ParserFactory
 from app.schemas.kb import (
     BatchProgressResponse,
     BatchUploadResponse,
+    CollectionListResponse,
+    CollectionResponse,
+    CollectionSummary,
+    CreateCollectionRequest,
     SearchDocument,
     SearchRequest,
     SearchResponse,
     SearchResult,
     SearchSource,
+    SourceListResponse,
+    SourceSummary,
     UploadResponse,
 )
 from app.services.kb_service import (
     CollectionAccessError,
+    CollectionAlreadyExistsError,
     CollectionKindMismatchError,
     CollectionNotFoundError,
     PendingUpload,
+    SourceNotFoundError,
     UnsupportedSearchKindError,
     create_pending_batch,
+    create_private_collection,
+    delete_collection,
+    delete_source,
     get_batch_progress,
+    get_collection,
     ingest_private_upload,
+    list_collections,
+    list_sources,
     search_chunks,
 )
 
@@ -347,3 +361,177 @@ async def _enqueue_sources(source_ids: list[UUID]) -> None:
             )
     finally:
         await redis.aclose()
+
+
+@router.get(
+    "/collections",
+    response_model=CollectionListResponse,
+    summary="List knowledge-base collections visible to the current user",
+)
+async def list_kb_collections(
+    current_user_id: Annotated[UUID, Depends(get_current_user_id)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    kind: Annotated[CollectionKind | None, Query()] = None,
+) -> CollectionListResponse:
+    """Return public collections plus the user's private ones, with live counts."""
+
+    collections = await list_collections(session, current_user_id=current_user_id, kind=kind)
+    return CollectionListResponse(
+        collections=[
+            CollectionSummary(
+                id=collection.id,
+                kind=collection.kind,
+                scope=collection.scope,
+                name=collection.name,
+                source_count=collection.source_count,
+                document_count=collection.document_count,
+                chunk_count=collection.chunk_count,
+            )
+            for collection in collections
+        ]
+    )
+
+
+@router.post(
+    "/collections",
+    response_model=CollectionResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Create a private knowledge-base collection owned by the current user",
+)
+async def create_kb_collection(
+    payload: CreateCollectionRequest,
+    current_user_id: Annotated[UUID, Depends(get_current_user_id)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> CollectionResponse:
+    """Create a private collection of any of the four library kinds."""
+
+    try:
+        collection = await create_private_collection(
+            session,
+            current_user_id=current_user_id,
+            kind=payload.kind,
+            name=payload.name,
+        )
+    except CollectionAlreadyExistsError as error:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+
+    await session.commit()
+    return CollectionResponse(
+        id=collection.id,
+        kind=collection.kind,
+        scope=collection.scope,
+        name=collection.name,
+        user_id=collection.user_id,
+    )
+
+
+@router.get(
+    "/collections/{collection_id}",
+    response_model=CollectionResponse,
+    summary="Get one collection's metadata",
+)
+async def get_kb_collection(
+    collection_id: UUID,
+    current_user_id: Annotated[UUID, Depends(get_current_user_id)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> CollectionResponse:
+    """Return one collection if it is public or owned by the current user."""
+
+    collection = await get_collection(session, collection_id=collection_id)
+    if collection is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Collection {collection_id} was not found",
+        )
+    if collection.scope is not CollectionScope.PUBLIC and collection.user_id != current_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the owner may view this collection",
+        )
+    return CollectionResponse(
+        id=collection.id,
+        kind=collection.kind,
+        scope=collection.scope,
+        name=collection.name,
+        user_id=collection.user_id,
+    )
+
+
+@router.get(
+    "/collections/{collection_id}/sources",
+    response_model=SourceListResponse,
+    summary="List uploaded sources (documents) in a collection with ingest status",
+)
+async def list_kb_sources(
+    collection_id: UUID,
+    current_user_id: Annotated[UUID, Depends(get_current_user_id)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> SourceListResponse:
+    """Return the documents in a visible collection, newest first."""
+
+    try:
+        sources = await list_sources(
+            session, current_user_id=current_user_id, collection_id=collection_id
+        )
+    except CollectionNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    except CollectionAccessError as error:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(error)) from error
+
+    return SourceListResponse(
+        sources=[
+            SourceSummary(
+                source_id=source.source_id,
+                filename=source.filename,
+                ingest_status=source.ingest_status,
+                dir_path=source.dir_path,
+                created_at=source.created_at,
+                document_id=source.document_id,
+                title=source.title,
+                chunk_count=source.chunk_count,
+            )
+            for source in sources
+        ]
+    )
+
+
+@router.delete(
+    "/sources/{source_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Soft-delete an uploaded source and remove its chunks",
+)
+async def delete_kb_source(
+    source_id: UUID,
+    current_user_id: Annotated[UUID, Depends(get_current_user_id)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> None:
+    """Delete one uploaded document from a private collection the user owns."""
+
+    try:
+        await delete_source(session, current_user_id=current_user_id, source_id=source_id)
+    except SourceNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    except CollectionAccessError as error:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(error)) from error
+
+
+@router.delete(
+    "/collections/{collection_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    summary="Delete a private collection and all its data",
+)
+async def delete_kb_collection(
+    collection_id: UUID,
+    current_user_id: Annotated[UUID, Depends(get_current_user_id)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+) -> None:
+    """Hard-delete a private collection owned by the current user."""
+
+    try:
+        await delete_collection(
+            session, current_user_id=current_user_id, collection_id=collection_id
+        )
+    except CollectionNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    except CollectionAccessError as error:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(error)) from error
