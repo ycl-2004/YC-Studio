@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     api_prefix: str = "/api"
     readiness_timeout_seconds: float = Field(default=1.0, gt=0, le=10.0)
     upload_max_bytes: int = Field(default=10 * 1024 * 1024, ge=1, le=100 * 1024 * 1024)
+    upload_storage_dir: Path = BACKEND_DIR / "data" / "uploads"
     cors_origins: list[str] = Field(
         default_factory=lambda: [
             "http://localhost:5173",

@@ -85,6 +85,8 @@ async def check_lifespan_routes_and_cors() -> None:
                 "/ready",
                 f"{settings.api_prefix}/",
                 f"{settings.api_prefix}/kb/upload",
+                f"{settings.api_prefix}/kb/batch-upload",
+                f"{settings.api_prefix}/kb/batches/{{batch_id}}",
                 f"{settings.api_prefix}/kb/search",
             }
             print("PASS OpenAPI exposes health, API index, and knowledge-base routes")

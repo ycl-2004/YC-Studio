@@ -15,7 +15,7 @@
 | Stage | 状态 |
 |:-:|---|
 | 0 地基与可观测 | ✅ Step 1–11 本地实现与验收完成（Step 11 待提交） |
-| 1 知识库摄取与四层分库 | 🟨 Step 1–8、10 已完成；Step 7 待真实数据索引基准；Step 9、11–12 未开始 |
+| 1 知识库摄取与四层分库 | 🟨 Step 1–10 已完成；Step 7 待真实数据索引基准；Step 11–12 未开始 |
 | 2–11 | ⬜ 未开始 |
 
 ## 结构
@@ -108,9 +108,10 @@ format/lint、mypy、pytest 和 Alembic drift check。CI 使用固定测试凭�
 应用运行后，GET /health 只检查进程存活；GET /ready 会实际检查 PostgreSQL
 与 Redis。依赖暂时不可用时，/ready 返回 503，但 /health 仍保持 200。
 
-Stage 1 的单文件摄取与检索接口分别是 `POST /api/kb/upload` 和
-`POST /api/kb/search`。当前两者以 `X-User-ID` 作为临时身份边界来执行私有库权限；
-Stage 4 会将其替换为已验证的登录身份。
+Stage 1 的接口包括同步单文件摄取 `POST /api/kb/upload`、异步批量摄取
+`POST /api/kb/batch-upload`（通过 ARQ worker 逐个处理）及其进度查询
+`GET /api/kb/batches/{batch_id}`、检索 `POST /api/kb/search`。当前都以 `X-User-ID`
+作为临时身份边界来执行私有库权限；Stage 4 会将其替换为已验证的登录身份。
 
 ## Python 版本说明
 

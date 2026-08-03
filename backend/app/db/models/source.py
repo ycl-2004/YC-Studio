@@ -38,6 +38,12 @@ class Source(Base):
         index=True,
     )
 
+    batch_id: Mapped[UUID | None] = mapped_column(
+        ForeignKey("ingest_batches.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+
     filename: Mapped[str] = mapped_column(String(200))
 
     content_hash: Mapped[str] = mapped_column(String(64))

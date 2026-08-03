@@ -64,6 +64,38 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    volumes:
+      - upload_data:/app/data/uploads
+
+  worker:
+    image: ycstudio-backend:local
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    init: true
+    env_file:
+      - ./backend/.env
+    environment:
+      YCSTUDIO_ENV_FILE: ""
+      DATABASE_HOST_OVERRIDE: db
+      DATABASE_PORT_OVERRIDE: "5432"
+      REDIS_HOST_OVERRIDE: redis
+      REDIS_PORT_OVERRIDE: "6379"
+      RUN_MIGRATIONS: "0"
+    command: ["arq", "app.tasks.worker.WorkerSettings"]
+    # The image's HEALTHCHECK curls :8000/health, which only the backend service
+    # serves. ARQ has no HTTP endpoint, so that probe would always fail here and
+    # report a running worker as "unhealthy" — disable it rather than lie.
+    healthcheck:
+      disable: true
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - upload_data:/app/data/uploads
 
   frontend:
     image: ycstudio-frontend:local
@@ -80,3 +112,4 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  upload_data:

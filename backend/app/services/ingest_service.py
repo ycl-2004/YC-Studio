@@ -241,6 +241,64 @@ async def ingest_document(
     return result
 
 
+async def ingest_pending_source(
+    session: AsyncSession,
+    *,
+    source: Source,
+    collection: Collection,
+    file_bytes: bytes,
+    metadata: dict[str, str],
+) -> IngestResult:
+    """Process a durable pending source created before an ARQ job was enqueued.
+
+    A cancelled worker leaves its transaction uncommitted, so ARQ can safely run the
+    same pending source again without creating a second Source row.
+    """
+
+    source_id = source.id
+    if source.ingest_status is IngestStatus.COMPLETED:
+        return IngestResult(source_id, None, 0, skipped=True)
+    if source.ingest_status is not IngestStatus.PENDING:
+        return IngestResult(source_id, None, 0, skipped=True)
+
+    settings = get_settings()
+    savepoint = await session.begin_nested()
+    try:
+        result = await _run_pipeline(
+            session,
+            source=source,
+            collection=collection,
+            filename=source.filename,
+            file_bytes=file_bytes,
+            file_path=None,
+            metadata=metadata,
+            count_tokens=None,
+            embedding_batch_size=settings.embedding_batch_size,
+            insert_batch_size=settings.ingest_batch_size,
+            max_tokens=settings.chunk_size,
+            overlap_tokens=settings.chunk_overlap,
+        )
+    except Exception as exc:
+        if savepoint.is_active:
+            await savepoint.rollback()
+        # source_id was captured before the savepoint opened; source.id would trigger a
+        # synchronous lazy-load on the now-expired instance and raise MissingGreenlet
+        # instead of recording this exception (see app/tasks/ingest_tasks.py).
+        await session.execute(
+            update(Source)
+            .where(Source.id == source_id)
+            .values(
+                ingest_status=IngestStatus.FAILED,
+                error_message=str(exc)[:_MAX_ERROR_MESSAGE_LENGTH],
+            )
+        )
+        await session.flush()
+        raise
+
+    await savepoint.commit()
+    return result
+
+
 async def _run_pipeline(
     session: AsyncSession,
     *,
@@ -268,7 +326,13 @@ async def _run_pipeline(
         source_id=source.id,
         title=parse_result.title,
         raw_text=cleaned_text,
-        meta={**parse_result.meta, **(metadata or {})},
+        # source.dir_path only exists for folder uploads (Step 9); it belongs in filterable
+        # metadata, not just on Source, or "filter search by folder" has no way to work.
+        meta={
+            **parse_result.meta,
+            **(metadata or {}),
+            **({"dir_path": source.dir_path} if source.dir_path else {}),
+        },
         parser_version=parse_result.parser_version,
     )
     session.add(document)

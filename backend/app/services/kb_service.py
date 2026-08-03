@@ -6,18 +6,20 @@ query vectors are normalized, so ``1 - distance / 2`` maps cosine similarity fro
 """
 
 from dataclasses import dataclass
+from pathlib import PurePosixPath
 from uuid import UUID
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db.models.chunk import Chunk
 from app.db.models.collection import Collection, CollectionKind, CollectionScope
 from app.db.models.document import Document
-from app.db.models.source import Source
+from app.db.models.ingest_batch import IngestBatch
+from app.db.models.source import IngestStatus, Source
 from app.rag.retriever.embeddings import get_local_embedding
 from app.schemas.kb import SearchRequest
-from app.services.ingest_service import IngestResult, ingest_document
+from app.services.ingest_service import IngestResult, compute_content_hash, ingest_document
 
 _SEARCHABLE_KINDS = frozenset({CollectionKind.CASE, CollectionKind.MATERIAL})
 
@@ -36,6 +38,27 @@ class CollectionKindMismatchError(ValueError):
 
 class UnsupportedSearchKindError(ValueError):
     """The requested collection kind is deliberately not vector-searchable."""
+
+
+@dataclass(frozen=True, slots=True)
+class PendingUpload:
+    """Validated bytes and optional client-supplied directory metadata for one file."""
+
+    filename: str
+    file_bytes: bytes
+    dir_path: str | None
+
+
+@dataclass(frozen=True, slots=True)
+class BatchProgress:
+    """Counts used to expose batch state without consulting ephemeral ARQ results."""
+
+    batch_id: UUID
+    total: int
+    completed: int
+    failed: int
+    in_progress: int
+    pending: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -86,6 +109,133 @@ async def ingest_private_upload(
 
     await session.commit()
     return result
+
+
+async def create_pending_batch(
+    session: AsyncSession,
+    *,
+    current_user_id: UUID,
+    collection_id: UUID,
+    kind: CollectionKind,
+    metadata: dict[str, str],
+    uploads: list[PendingUpload],
+) -> tuple[IngestBatch, list[Source]]:
+    """Persist a batch and pending Sources before any file is placed on the queue."""
+
+    collection = await _owned_private_collection(
+        session,
+        current_user_id=current_user_id,
+        collection_id=collection_id,
+        kind=kind,
+    )
+    batch = IngestBatch(
+        collection_id=collection.id,
+        user_id=current_user_id,
+        upload_metadata=metadata,
+    )
+    session.add(batch)
+    await session.flush()
+
+    sources: list[Source] = []
+    seen_hashes: set[str] = set()
+    for upload in uploads:
+        content_hash = compute_content_hash(upload.file_bytes)
+        if content_hash in seen_hashes:
+            raise ValueError("A batch cannot include the same file content twice.")
+        seen_hashes.add(content_hash)
+        existing = await session.scalar(
+            select(Source.id).where(
+                Source.collection_id == collection.id,
+                Source.content_hash == content_hash,
+                Source.deleted_at.is_(None),
+            )
+        )
+        if existing is not None:
+            raise ValueError("This collection already contains one of the uploaded files.")
+        source = Source(
+            collection_id=collection.id,
+            batch_id=batch.id,
+            filename=upload.filename,
+            content_hash=content_hash,
+            dir_path=_normalise_dir_path(upload.dir_path),
+            ingest_status=IngestStatus.PENDING,
+        )
+        session.add(source)
+        sources.append(source)
+    await session.flush()
+    return batch, sources
+
+
+async def get_batch_progress(
+    session: AsyncSession,
+    *,
+    current_user_id: UUID,
+    batch_id: UUID,
+) -> BatchProgress:
+    """Return database counters for a batch owned by the current principal."""
+
+    batch = await session.get(IngestBatch, batch_id)
+    if batch is None:
+        raise CollectionNotFoundError(f"Batch {batch_id} was not found")
+    if batch.user_id != current_user_id:
+        raise CollectionAccessError("Only the owner may view this batch")
+
+    rows = await session.execute(
+        select(Source.ingest_status, func.count())
+        .where(Source.batch_id == batch_id)
+        .group_by(Source.ingest_status)
+    )
+    counts = {status: int(count) for status, count in rows}
+    completed = counts.get(IngestStatus.COMPLETED, 0)
+    failed = counts.get(IngestStatus.FAILED, 0)
+    pending = counts.get(IngestStatus.PENDING, 0)
+    in_progress = sum(
+        counts.get(status, 0)
+        for status in (IngestStatus.PARSING, IngestStatus.CHUNKING, IngestStatus.EMBEDDING)
+    )
+    return BatchProgress(
+        batch_id=batch_id,
+        total=sum(counts.values()),
+        completed=completed,
+        failed=failed,
+        in_progress=in_progress,
+        pending=pending,
+    )
+
+
+async def _owned_private_collection(
+    session: AsyncSession,
+    *,
+    current_user_id: UUID,
+    collection_id: UUID,
+    kind: CollectionKind,
+) -> Collection:
+    """Load the exact private collection that an upload may use."""
+
+    collection = await session.get(Collection, collection_id)
+    if collection is None:
+        raise CollectionNotFoundError(f"Collection {collection_id} was not found")
+    if collection.scope is not CollectionScope.PRIVATE or collection.user_id != current_user_id:
+        raise CollectionAccessError("Only the owner may upload to a private collection")
+    if collection.kind is not kind:
+        raise CollectionKindMismatchError(
+            f"Form kind {kind.value!r} does not match collection kind {collection.kind.value!r}"
+        )
+    return collection
+
+
+def _normalise_dir_path(dir_path: str | None) -> str | None:
+    """Accept a relative POSIX client path only; never let it become a filesystem path."""
+
+    if dir_path is None or not dir_path.strip():
+        return None
+    normalised = dir_path.replace("\\", "/").strip("/")
+    path = PurePosixPath(normalised)
+    if path.is_absolute() or ".." in path.parts or normalised in {"", "."}:
+        raise ValueError("dir_path must be a non-empty relative path without '..'.")
+    if len(normalised) > 200:
+        raise ValueError("dir_path must be at most 200 characters.")
+    return normalised
 
 
 async def search_chunks(

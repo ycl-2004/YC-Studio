@@ -17,6 +17,25 @@ class UploadResponse(BaseModel):
     skipped: bool
 
 
+class BatchUploadResponse(BaseModel):
+    """Immediate acknowledgement for files persisted for asynchronous ingest."""
+
+    batch_id: UUID
+    source_ids: list[UUID]
+    total: Annotated[int, Field(ge=1)]
+
+
+class BatchProgressResponse(BaseModel):
+    """The database-backed processing state for one batch upload."""
+
+    batch_id: UUID
+    total: Annotated[int, Field(ge=0)]
+    completed: Annotated[int, Field(ge=0)]
+    failed: Annotated[int, Field(ge=0)]
+    in_progress: Annotated[int, Field(ge=0)]
+    pending: Annotated[int, Field(ge=0)]
+
+
 class SearchRequest(BaseModel):
     """A vector search restricted to one searchable library kind."""
 

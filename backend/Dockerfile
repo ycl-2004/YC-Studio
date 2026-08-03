@@ -35,8 +35,8 @@ COPY --chown=app:app scripts/build_indexes.py /app/scripts/build_indexes.py
 COPY --chown=app:app docker-entrypoint.sh /app/docker-entrypoint.sh
 
 RUN chmod +x /app/docker-entrypoint.sh \
-    && mkdir -p /app/.cache/huggingface \
-    && chown -R app:app /app/.cache
+    && mkdir -p /app/.cache/huggingface /app/data/uploads \
+    && chown -R app:app /app/.cache /app/data
 
 USER app
 

@@ -23,6 +23,7 @@ dependencies = [
     "sentence-transformers>=5.6.1",
     "langchain-huggingface>=1.2.2",
     "python-multipart>=0.0.32",
+    "arq>=0.25.0",
 ]
 
 [dependency-groups]
