@@ -58,7 +58,8 @@ const groups = [
   {
     label: '复盘',
     items: [
-      { to: '/dashboard', label: '复盘看板', icon: 'chart' }
+      { to: '/dashboard', label: '复盘看板', icon: 'chart' },
+      { to: '/evaluation', label: '检索评测', icon: 'chart' }
     ]
   }
 ]

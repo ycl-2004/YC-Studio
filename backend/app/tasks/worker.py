@@ -11,6 +11,7 @@ from sqlalchemy import select
 from app.core.config import get_settings
 from app.db.models.source import IngestStatus, Source
 from app.db.session import async_session_factory
+from app.tasks.eval_tasks import evaluate_run, generate_eval_dataset
 from app.tasks.ingest_tasks import ingest_source
 
 
@@ -35,7 +36,7 @@ async def recover_pending_sources(ctx: dict[str, Any]) -> None:
 class WorkerSettings:
     """Configuration consumed by the ARQ CLI and Compose worker service."""
 
-    functions = [ingest_source]
+    functions = [ingest_source, generate_eval_dataset, evaluate_run]
     on_startup = recover_pending_sources
     redis_settings = RedisSettings.from_dsn(get_settings().redis_url)
     max_jobs = 4

@@ -36,6 +36,12 @@ const routes = [
         component: () => import('@/pages/Dashboard.vue'),
         meta: { title: '复盘看板', group: 'review' }
       },
+      {
+        path: 'evaluation',
+        name: 'evaluation',
+        component: () => import('@/pages/Evaluation.vue'),
+        meta: { title: '检索评测', group: 'review' }
+      },
     ]
   },
   { path: '/:pathMatch(.*)*', name: 'not-found', component: () => import('@/pages/NotFound.vue') }
