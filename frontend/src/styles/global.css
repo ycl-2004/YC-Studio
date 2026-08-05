@@ -1,0 +1,372 @@
+/* =========================================================================
+   YC Studio — global base + design-system primitives
+   Built on tokens.css. Keep brand iron-rules: opacity/transform motion only,
+   no AI blue-purple gradients / neon / glow / glassmorphism, never wine=error.
+   ========================================================================= */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body, #app { height: 100%; }
+
+/* ---- App frame metrics ----
+   The shell is a fixed-height frame; `.shell__scroll` is the ONE scroll
+   container. Anything that wants to be "full height" inside a page measures
+   against --view-h, and anything sticky pins at --stick-top. */
+:root {
+  --topbar-h: 64px;
+  --view-h: calc(100vh - var(--topbar-h));
+  --stick-top: var(--sp-6);
+}
+@supports (height: 100dvh) {
+  :root { --view-h: calc(100dvh - var(--topbar-h)); }
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-sans);
+  font-size: var(--fs-body);
+  line-height: var(--lh-body);
+  color: var(--ink);
+  background: var(--cream);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+h1, h2, h3, h4 {
+  font-family: var(--font-serif);
+  color: var(--ink);
+  line-height: var(--lh-tight);
+  margin: 0;
+  font-weight: 700;
+}
+
+a { color: var(--denim-deep); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+button { font-family: inherit; cursor: pointer; }
+
+::selection { background: var(--wine-100); color: var(--wine-deep); }
+
+/* ---- Scrollbars (subtle, on-brand) ---- */
+* { scrollbar-width: thin; scrollbar-color: var(--n-300) transparent; }
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-thumb {
+  background: var(--n-300); border-radius: var(--r-pill);
+  border: 3px solid transparent; background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover { background: var(--n-400); background-clip: content-box; }
+
+/* =========================================================================
+   EYEBROW / LABELS
+   ========================================================================= */
+/* The eyebrow is a PAGE-level device: at most one per screen (page header or
+   drawer header). Card and panel headings use .yc-label instead — a wall of
+   uppercase wide-tracked micro-labels is the fastest way to make a product UI
+   look machine-generated. No decorative dot: dots are reserved for real state. */
+.yc-eyebrow {
+  font-family: var(--font-accent);
+  font-style: italic;
+  font-size: var(--fs-caption);
+  letter-spacing: var(--tracking-caption);
+  text-transform: uppercase;
+  color: var(--denim-deep);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+
+/* Quiet functional heading for cards, panels and table groups. */
+.yc-label {
+  font-family: var(--font-sans);
+  font-size: var(--fs-small);
+  font-weight: 700;
+  color: var(--ink);
+  letter-spacing: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: var(--sp-2);
+}
+.yc-label--muted { color: var(--ink-muted); font-weight: 500; }
+
+.yc-mono { font-family: var(--font-code); font-size: 0.85em; }
+.yc-hand { font-family: var(--font-hand); color: var(--blush-deep); }
+.yc-num  { font-family: var(--font-accent); font-style: italic; font-variant-numeric: tabular-nums; }
+
+/* =========================================================================
+   BRAND MOTIFS  (README §9 — carriers, used sparingly, max one per screen)
+   ========================================================================= */
+
+/* Margin annotation. At most one per screen.
+   Caveat carries no CJK glyphs, so Chinese copy must not depend on it — the
+   annotation reads through the leading rule and the blush colour instead. */
+.yc-note {
+  font-family: 'Caveat', var(--font-sans);
+  font-size: var(--fs-small);
+  line-height: 1.6;
+  color: var(--blush-deep);
+  display: flex; align-items: center; gap: var(--sp-2);
+  margin: 0;
+}
+.yc-note::before {
+  content: ""; width: 20px; height: 1.5px; flex: 0 0 auto;
+  background: var(--blush-200);
+}
+
+/* Ghost ordinal — Fraunces italic, ~10% wine, sits behind its content. */
+.yc-ghost {
+  font-family: var(--font-accent); font-style: italic; font-weight: 600;
+  color: var(--wine); opacity: .12; line-height: .8;
+  font-size: 3.2rem; letter-spacing: -.04em;
+  user-select: none; pointer-events: none;
+}
+
+/* =========================================================================
+   BUTTONS
+   ========================================================================= */
+.yc-btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--sp-2);
+  border: 1px solid transparent;
+  border-radius: var(--r-control);
+  padding: 10px 18px;
+  font-size: var(--fs-small);
+  font-weight: 700;
+  line-height: 1;
+  transition: transform var(--dur-fast) var(--ease-out),
+              box-shadow var(--dur-base) var(--ease-out),
+              background var(--dur-base) var(--ease-out),
+              border-color var(--dur-base) var(--ease-out),
+              color var(--dur-base) var(--ease-out);
+  white-space: nowrap;
+}
+.yc-btn:active { transform: scale(.97); }
+.yc-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(59,110,165,.4); }
+.yc-btn:disabled { opacity: .5; cursor: not-allowed; }
+
+.yc-btn--wine {
+  background: var(--wine); color: #fff;
+  box-shadow: var(--sh-wine);
+}
+.yc-btn--wine:hover:not(:disabled) { background: var(--wine-deep); box-shadow: var(--sh-lg); }
+
+.yc-btn--ghost {
+  background: transparent; color: var(--ink-muted);
+  border-color: var(--border-strong);
+}
+.yc-btn--ghost:hover:not(:disabled) { color: var(--denim-deep); border-color: var(--denim); background: var(--denim-50); }
+
+.yc-btn--soft {
+  background: var(--denim-50); color: var(--denim-deep);
+}
+.yc-btn--soft:hover:not(:disabled) { background: var(--denim-soft); }
+
+.yc-btn--danger {
+  background: transparent; color: var(--error-deep);
+  border-color: var(--error-soft);
+}
+.yc-btn--danger:hover:not(:disabled) { background: var(--error-soft); border-color: var(--error); }
+
+.yc-btn--sm { padding: 6px 12px; font-size: var(--fs-caption); }
+.yc-btn--icon { padding: 8px; border-radius: var(--r-control); background: transparent; color: var(--ink-muted); border-color: var(--border-default); }
+.yc-btn--icon:hover:not(:disabled) { color: var(--denim-deep); border-color: var(--denim); background: var(--denim-50); }
+
+/* =========================================================================
+   CARD / PANEL
+   ========================================================================= */
+.yc-card {
+  background: var(--paper);
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-panel);
+  box-shadow: var(--sh-sm);
+  padding: var(--sp-6);
+}
+.yc-card--flush { padding: 0; overflow: hidden; }
+.yc-surface {
+  background: var(--cream-deep);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--r-content);
+}
+
+/* =========================================================================
+   TAGS / BADGES (Fraunces italic caption)
+   ========================================================================= */
+.yc-tag {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--font-accent); font-style: italic;
+  font-size: var(--fs-caption); letter-spacing: .02em;
+  padding: 4px 10px; border-radius: var(--r-control);
+  background: var(--paper);
+  border: 1.5px solid rgba(26,26,46,.07);
+  color: var(--ink-muted);
+}
+.yc-tag--sel { background: var(--denim-soft); border-color: var(--denim-200); color: var(--denim-deep); }
+.yc-tag--wine { background: var(--wine-50); border-color: var(--wine-100); color: var(--wine-deep); }
+.yc-tag--blush { background: var(--blush-50); border-color: var(--blush-100); color: var(--blush-deep); }
+
+.yc-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: var(--fs-caption); font-weight: 700;
+  padding: 3px 10px; border-radius: var(--r-pill);
+  font-family: var(--font-sans);
+  white-space: nowrap;            /* keep status text on a single line */
+  line-height: 1.4;               /* stable height across widths */
+  width: -webkit-fit-content;
+  width: fit-content;             /* refuse to shrink below intrinsic text width */
+}
+.yc-badge .dot { width: 7px; height: 7px; border-radius: var(--r-pill); background: currentColor; }
+.yc-badge--info    { color: var(--info-deep);    background: var(--info-soft); }
+.yc-badge--success { color: var(--success-deep); background: var(--success-soft); }
+.yc-badge--warning { color: var(--warning-deep); background: var(--warning-soft); }
+.yc-badge--error   { color: var(--error-deep);   background: var(--error-soft); }
+.yc-badge--neutral { color: var(--ink-muted);    background: var(--n-100); }
+.yc-badge--wine    { color: var(--wine-deep);    background: var(--wine-50); }
+
+/* =========================================================================
+   INPUTS
+   ========================================================================= */
+.yc-input, .yc-select, .yc-textarea {
+  width: 100%;
+  font-family: var(--font-sans);
+  font-size: var(--fs-small);
+  color: var(--ink);
+  background: var(--paper);
+  border: 1px solid var(--border-default);
+  border-radius: var(--r-control);
+  padding: 10px 12px;
+  transition: border-color var(--dur-base) var(--ease-out), box-shadow var(--dur-base) var(--ease-out);
+}
+.yc-textarea { resize: vertical; min-height: 88px; line-height: 1.6; }
+.yc-input:focus, .yc-select:focus, .yc-textarea:focus {
+  outline: none; border-color: var(--denim); box-shadow: 0 0 0 3px rgba(59,110,165,.18);
+}
+.yc-input::placeholder, .yc-textarea::placeholder { color: var(--n-400); }
+.yc-field { display: flex; flex-direction: column; gap: 6px; }
+.yc-field > label { font-size: var(--fs-caption); font-weight: 700; color: var(--ink-muted); letter-spacing: .02em; }
+
+/* =========================================================================
+   LAYOUT HELPERS
+   ========================================================================= */
+.yc-row { display: flex; align-items: center; gap: var(--sp-3); }
+.yc-row--between { justify-content: space-between; }
+.yc-col { display: flex; flex-direction: column; }
+.yc-wrap { flex-wrap: wrap; }
+.yc-grid { display: grid; gap: var(--sp-4); }
+.yc-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-3); }
+@media (max-width: 700px) { .yc-grid2 { grid-template-columns: 1fr; } }
+.yc-muted { color: var(--ink-muted); }
+.yc-faint { color: var(--ink-faint); }
+.yc-spacer { flex: 1 1 auto; }
+.divider { height: 1px; background: var(--border-subtle); border: 0; margin: var(--sp-4) 0; }
+
+/* =========================================================================
+   DATA TABLE (sticky header, status badges, row actions)
+   ========================================================================= */
+.yc-table-wrap { width: 100%; overflow-x: auto; }
+table.yc-table {
+  width: 100%; border-collapse: collapse; font-size: var(--fs-small);
+  min-width: 640px;
+}
+table.yc-table thead th {
+  position: sticky; top: 0; z-index: 1;
+  text-align: left; font-weight: 700; color: var(--ink-muted);
+  font-size: var(--fs-caption); letter-spacing: .04em; text-transform: uppercase;
+  background: var(--cream-deep);
+  padding: 12px 16px; border-bottom: 1px solid var(--border-default);
+  white-space: nowrap;
+}
+table.yc-table tbody td {
+  padding: 13px 16px; border-bottom: 1px solid var(--border-subtle);
+  color: var(--ink); vertical-align: middle;
+}
+/* numeric, mono and status cells must never wrap onto a second line */
+table.yc-table td .yc-mono,
+table.yc-table td .yc-faint,
+table.yc-table td .yc-num { white-space: nowrap; }
+table.yc-table tbody tr { transition: background var(--dur-fast) var(--ease-out); }
+table.yc-table tbody tr:hover { background: var(--cream-deep); }
+table.yc-table tbody tr:last-child td { border-bottom: 0; }
+.cell-strong { font-weight: 700; }
+.cell-mono { font-family: var(--font-code); font-size: .82em; color: var(--ink-muted); }
+.row-actions { display: flex; gap: 6px; justify-content: flex-end; align-items: center; }
+
+/* =========================================================================
+   SKELETON
+   ========================================================================= */
+.yc-skel {
+  background: linear-gradient(90deg, var(--n-100) 25%, var(--n-200) 37%, var(--n-100) 63%);
+  background-size: 400% 100%;
+  animation: yc-shimmer 1.4s ease-in-out infinite;
+  border-radius: var(--r-control);
+}
+@keyframes yc-shimmer { 0% { background-position: 100% 0; } 100% { background-position: 0 0; } }
+@media (prefers-reduced-motion: reduce){ .yc-skel { animation: none; } }
+
+/* =========================================================================
+   STATE BLOCKS (empty / error)
+   ========================================================================= */
+.yc-state {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  text-align: center; gap: var(--sp-3);
+  padding: var(--sp-8) var(--sp-6);
+  color: var(--ink-muted);
+}
+.yc-state__icon {
+  width: 48px; height: 48px; border-radius: var(--r-pill);
+  display: grid; place-items: center;
+  background: var(--cream-deep); border: 1px solid var(--border-default);
+  color: var(--denim);
+}
+.yc-state--error .yc-state__icon { color: var(--error); background: var(--error-soft); border-color: var(--error-soft); }
+.yc-state__title { font-family: var(--font-serif); font-weight: 700; font-size: var(--fs-h3); color: var(--ink); margin: 0; }
+.yc-state__desc { margin: 0; max-width: 420px; font-size: var(--fs-small); line-height: 1.7; }
+
+/* =========================================================================
+   SPINNER
+   ========================================================================= */
+.yc-spin {
+  width: 22px; height: 22px; border-radius: 50%;
+  border: 2.5px solid var(--denim-soft); border-top-color: var(--denim);
+  animation: yc-spin .8s linear infinite;
+}
+.yc-spin--sm { width: 14px; height: 14px; border-width: 2px; }
+@keyframes yc-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce){ .yc-spin { animation-duration: 2s; } }
+
+/* =========================================================================
+   MODAL / DRAWER
+   ========================================================================= */
+.yc-overlay {
+  position: fixed; inset: 0; background: rgba(21,24,33,.42);
+  display: grid; place-items: center; padding: var(--sp-6);
+  z-index: 50; animation: yc-fade var(--dur-base) var(--ease-out);
+}
+@keyframes yc-fade { from { opacity: 0; } to { opacity: 1; } }
+.yc-modal {
+  background: var(--paper); border-radius: var(--r-panel);
+  box-shadow: var(--sh-md); width: min(520px, 100%);
+  max-height: 88vh; overflow: auto; padding: var(--sp-6);
+  animation: yc-pop var(--dur-base) var(--ease-out);
+}
+@keyframes yc-pop { from { opacity: 0; transform: translateY(12px) scale(.98); } to { opacity: 1; transform: none; } }
+.yc-drawer {
+  position: fixed; top: 0; right: 0; bottom: 0; width: min(520px, 100%);
+  background: var(--paper); box-shadow: var(--sh-md); z-index: 50;
+  display: flex; flex-direction: column;
+  animation: yc-slide var(--dur-base) var(--ease-out);
+}
+@keyframes yc-slide { from { transform: translateX(100%); } to { transform: none; } }
+
+@media (prefers-reduced-motion: reduce){
+  .yc-overlay, .yc-modal, .yc-drawer { animation: none; }
+}
+
+/* =========================================================================
+   DIALOG CONTENT  (slotted into Modal / Drawer from several pages — must be
+   global, scoped page styles do not reliably reach across every host)
+   ========================================================================= */
+.yk-field { display: flex; flex-direction: column; gap: 6px; }
+.yk-field > label { font-size: var(--fs-caption); font-weight: 700; color: var(--ink-muted); letter-spacing: .02em; }
+.yk-row { display: flex; gap: var(--sp-2); align-items: center; }
+.yk-row .yc-input { flex: 1; }
+.yk-confirm { font-size: var(--fs-small); line-height: 1.75; color: var(--ink-muted); margin: 0; }
+.yk-confirm strong { color: var(--ink); }
+.yk-kinds { display: flex; gap: 6px; flex-wrap: wrap; }

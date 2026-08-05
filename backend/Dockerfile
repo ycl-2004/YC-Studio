@@ -16,12 +16,29 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 
 FROM python:3.12-slim-bookworm AS runtime
 
+# docling's PDF pipeline imports OpenCV, which dynamically loads these X11/GLib
+# shared objects even in headless use. Without them every PDF upload fails at
+# import time with "libxcb.so.1: cannot open shared object file", while Markdown
+# and text uploads succeed — so the gap only shows up on one file type.
+RUN apt-get update \
+    && apt-get install --no-install-recommends --yes \
+        libxcb1 \
+        libgl1 \
+        libglib2.0-0 \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN groupadd --gid 10001 app \
     && useradd --no-log-init --uid 10001 --gid app --create-home app
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PATH="/app/.venv/bin:$PATH" \
+    # The image builds with `uv sync --no-install-project`, so `app` is a copied
+    # directory rather than an installed package. uvicorn and arq happen to find it
+    # because sys.path[0] is the working directory, but `python scripts/x.py` sets
+    # sys.path[0] to scripts/ and fails on `import app`. Pin the root explicitly so
+    # every entry point resolves it the same way.
+    PYTHONPATH=/app \
     HF_HOME=/app/.cache/huggingface \
     TRANSFORMERS_CACHE=/app/.cache/huggingface
 

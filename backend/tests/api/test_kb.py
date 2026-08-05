@@ -1,5 +1,6 @@
 """Stage 1 Step 8/10 HTTP contracts against the real database fixture."""
 
+from pathlib import Path
 from types import SimpleNamespace
 from uuid import UUID, uuid4
 
@@ -7,6 +8,7 @@ from httpx import AsyncClient
 from pytest import MonkeyPatch, mark
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.adapters.storage import LocalUploadStorage
 from app.db.models.chunk import Chunk
 from app.db.models.collection import Collection, CollectionKind, CollectionScope
 from app.db.models.document import Document
@@ -644,3 +646,408 @@ async def test_delete_source_rejects_public_collection(
     )
     assert response.status_code == 403
     assert "Only the owner" in response.json()["detail"]
+
+
+def _install_temporary_upload_storage(monkeypatch: MonkeyPatch, root: Path) -> None:
+    """Point both the writing (API) and reading (service) sides at one scratch directory.
+
+    Each module imported ``LocalUploadStorage`` by name, so patching only one leaves the
+    other writing to — or reading from — the developer's real backend/data/uploads.
+    """
+
+    def storage_factory() -> LocalUploadStorage:
+        return LocalUploadStorage(root)
+
+    monkeypatch.setattr("app.api.kb.LocalUploadStorage", storage_factory)
+    monkeypatch.setattr("app.services.kb_service.LocalUploadStorage", storage_factory)
+
+
+def test_every_parsable_suffix_has_a_served_media_type() -> None:
+    """A stored format must always be previewable or at least downloadable."""
+
+    from app.api.kb import _SERVED_FILE_BY_SUFFIX
+    from app.schemas.kb import SourcePreviewMode
+
+    assert set(ParserFactory.supported_suffixes()) == set(_SERVED_FILE_BY_SUFFIX)
+    # Uploaded markup is never served as HTML from the API origin, or a stored file
+    # could run script against it.
+    for suffix in (".htm", ".html"):
+        media_type, mode = _SERVED_FILE_BY_SUFFIX[suffix]
+        assert media_type.startswith("text/plain")
+        assert mode is SourcePreviewMode.DOWNLOAD
+
+
+async def test_preview_returns_file_facts_parsed_text_and_chunks(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _install_fake_ingest_embedding(monkeypatch)
+    _install_temporary_upload_storage(monkeypatch, tmp_path)
+    user = await _user(db_session, "previewer")
+    collection = await _private_collection(db_session, owner_id=user.id)
+    file_bytes = b"# Preview me\n\nThe original bytes are kept for the drawer."
+
+    upload = await client.post(
+        "/api/kb/upload",
+        files={"file": ("preview.md", file_bytes, "text/markdown")},
+        data={
+            "collection_id": str(collection.id),
+            "kind": "material",
+            "platform": "general",
+            "content_type": "tutorial",
+        },
+        headers={"X-User-ID": str(user.id)},
+    )
+    assert upload.status_code == 201, upload.text
+    source_id = upload.json()["source_id"]
+
+    response = await client.get(
+        f"/api/kb/sources/{source_id}/preview",
+        headers={"X-User-ID": str(user.id)},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["filename"] == "preview.md"
+    assert body["suffix"] == ".md"
+    assert body["preview_mode"] == "text"
+    assert body["ingest_status"] == "completed"
+    assert body["original_available"] is True
+    assert body["size_bytes"] == len(file_bytes)
+    assert body["document_id"] == upload.json()["document_id"]
+    assert "The original bytes are kept for the drawer." in body["raw_text"]
+    assert body["raw_text_truncated"] is False
+    assert body["chunk_count"] == 1
+    assert len(body["chunks"]) == 1
+    assert body["chunks"][0]["ordinal"] == 0
+    assert body["chunks_truncated"] is False
+
+
+async def test_preview_reports_a_missing_original_but_keeps_parsed_text(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Seeded public libraries have parsed text and no stored file; both routes say so."""
+
+    _install_temporary_upload_storage(monkeypatch, tmp_path)
+    user = await _user(db_session, "seed-reader")
+    public = Collection(
+        user_id=None,
+        kind=CollectionKind.RULE,
+        scope=CollectionScope.PUBLIC,
+        name=f"public-{uuid4().hex}",
+    )
+    db_session.add(public)
+    await db_session.flush()
+    source = Source(
+        collection_id=public.id,
+        filename="baseline.md",
+        content_hash="c" * 64,
+        ingest_status=IngestStatus.COMPLETED,
+    )
+    db_session.add(source)
+    await db_session.flush()
+    db_session.add(
+        Document(
+            source_id=source.id,
+            title="Baseline",
+            raw_text="The parsed text survives without the original upload.",
+            meta={},
+            parser_version="test",
+        )
+    )
+    await db_session.flush()
+
+    preview = await client.get(
+        f"/api/kb/sources/{source.id}/preview",
+        headers={"X-User-ID": str(user.id)},
+    )
+    assert preview.status_code == 200, preview.text
+    body = preview.json()
+    assert body["original_available"] is False
+    assert body["size_bytes"] is None
+    assert body["raw_text"] == "The parsed text survives without the original upload."
+    assert body["chunk_count"] == 0
+
+    file_response = await client.get(
+        f"/api/kb/sources/{source.id}/file",
+        headers={"X-User-ID": str(user.id)},
+    )
+    assert file_response.status_code == 404
+    assert "only its parsed text is available" in file_response.json()["detail"]
+
+
+async def test_source_file_serves_the_stored_original_inline_and_as_attachment(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _install_fake_ingest_embedding(monkeypatch)
+    _install_temporary_upload_storage(monkeypatch, tmp_path)
+    user = await _user(db_session, "downloader")
+    collection = await _private_collection(db_session, owner_id=user.id)
+    file_bytes = b"# Original\n\nByte-for-byte what was uploaded."
+
+    upload = await client.post(
+        "/api/kb/upload",
+        files={"file": ("original.md", file_bytes, "text/markdown")},
+        data={
+            "collection_id": str(collection.id),
+            "kind": "material",
+            "platform": "general",
+            "content_type": "tutorial",
+        },
+        headers={"X-User-ID": str(user.id)},
+    )
+    assert upload.status_code == 201, upload.text
+    source_id = upload.json()["source_id"]
+
+    inline = await client.get(
+        f"/api/kb/sources/{source_id}/file",
+        headers={"X-User-ID": str(user.id)},
+    )
+    assert inline.status_code == 200, inline.text
+    assert inline.content == file_bytes
+    assert inline.headers["content-type"].startswith("text/markdown")
+    assert inline.headers["content-disposition"].startswith("inline")
+    assert inline.headers["x-content-type-options"] == "nosniff"
+
+    attachment = await client.get(
+        f"/api/kb/sources/{source_id}/file",
+        params={"download": "true"},
+        headers={"X-User-ID": str(user.id)},
+    )
+    assert attachment.status_code == 200, attachment.text
+    assert attachment.headers["content-disposition"].startswith("attachment")
+
+
+async def test_preview_and_file_reject_someone_elses_private_collection(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _install_temporary_upload_storage(monkeypatch, tmp_path)
+    owner = await _user(db_session, "owner")
+    stranger = await _user(db_session, "stranger")
+    collection = await _private_collection(db_session, owner_id=owner.id)
+    source = Source(
+        collection_id=collection.id,
+        filename="private.md",
+        content_hash="d" * 64,
+        ingest_status=IngestStatus.COMPLETED,
+    )
+    db_session.add(source)
+    await db_session.flush()
+
+    for path in (f"/api/kb/sources/{source.id}/preview", f"/api/kb/sources/{source.id}/file"):
+        response = await client.get(path, headers={"X-User-ID": str(stranger.id)})
+        assert response.status_code == 403, response.text
+        assert "Only the owner" in response.json()["detail"]
+
+
+async def test_preview_404_after_the_source_is_deleted(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    _install_fake_ingest_embedding(monkeypatch)
+    _install_temporary_upload_storage(monkeypatch, tmp_path)
+    user = await _user(db_session, "deleter")
+    collection = await _private_collection(db_session, owner_id=user.id)
+    upload = await client.post(
+        "/api/kb/upload",
+        files={"file": ("gone.md", b"# Gone\n\nSoon soft-deleted.", "text/markdown")},
+        data={
+            "collection_id": str(collection.id),
+            "kind": "material",
+            "platform": "general",
+            "content_type": "tutorial",
+        },
+        headers={"X-User-ID": str(user.id)},
+    )
+    assert upload.status_code == 201, upload.text
+    source_id = upload.json()["source_id"]
+
+    deleted = await client.delete(
+        f"/api/kb/sources/{source_id}", headers={"X-User-ID": str(user.id)}
+    )
+    assert deleted.status_code == 204
+
+    response = await client.get(
+        f"/api/kb/sources/{source_id}/preview",
+        headers={"X-User-ID": str(user.id)},
+    )
+    assert response.status_code == 404
+
+
+async def test_preview_404_for_an_unknown_source(client: AsyncClient) -> None:
+    response = await client.get(
+        f"/api/kb/sources/{uuid4()}/preview",
+        headers={"X-User-ID": str(uuid4())},
+    )
+    assert response.status_code == 404
+
+
+async def test_create_collection_reports_an_unknown_principal_not_a_duplicate(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    """A UUID that names no user must not be reported as a name conflict.
+
+    Both failures arrive as IntegrityError; only the SQLSTATE distinguishes the
+    foreign key on kb_collections.user_id from the owner/kind/name unique index.
+    """
+
+    del db_session  # The fixture supplies the transaction the endpoint runs in.
+    response = await client.post(
+        "/api/kb/collections",
+        json={"kind": "material", "name": f"orphan-{uuid4().hex}"},
+        headers={"X-User-ID": str(uuid4())},
+    )
+
+    assert response.status_code == 401, response.text
+    detail = response.json()["detail"]
+    assert "does not exist" in detail
+    assert "already exists" not in detail
+
+
+async def test_create_collection_still_reports_a_real_duplicate_as_conflict(
+    client: AsyncClient,
+    db_session: AsyncSession,
+) -> None:
+    """The 23505 path keeps its 409 now that 23503 has its own answer."""
+
+    user = await _user(db_session, "duplicate-owner")
+    payload = {"kind": "material", "name": f"dup-{uuid4().hex}"}
+
+    first = await client.post(
+        "/api/kb/collections", json=payload, headers={"X-User-ID": str(user.id)}
+    )
+    assert first.status_code == 201, first.text
+
+    second = await client.post(
+        "/api/kb/collections", json=payload, headers={"X-User-ID": str(user.id)}
+    )
+    assert second.status_code == 409, second.text
+    assert "already exists" in second.json()["detail"]
+
+
+async def test_upload_retries_a_failed_source_instead_of_skipping_it(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """A file whose first ingest failed must be uploadable again.
+
+    Deduplication keys on (collection, content hash) alone, so a failed row used to
+    make the identical bytes permanently unacceptable: the retry returned
+    ``skipped: true`` and the user's only workaround was to edit the file.
+    """
+
+    from app.services.ingest_service import compute_content_hash
+
+    _install_fake_ingest_embedding(monkeypatch)
+    _install_temporary_upload_storage(monkeypatch, tmp_path)
+    user = await _user(db_session, "retrier")
+    collection = await _private_collection(db_session, owner_id=user.id)
+    file_bytes = b"# Retry me\n\nThe first attempt failed before this document existed."
+
+    failed_source = Source(
+        collection_id=collection.id,
+        filename="retry.md",
+        content_hash=compute_content_hash(file_bytes),
+        ingest_status=IngestStatus.FAILED,
+        error_message="the embedding model was unavailable",
+    )
+    db_session.add(failed_source)
+    await db_session.flush()
+
+    response = await client.post(
+        "/api/kb/upload",
+        files={"file": ("retry.md", file_bytes, "text/markdown")},
+        data={
+            "collection_id": str(collection.id),
+            "kind": "material",
+            "platform": "general",
+            "content_type": "tutorial",
+        },
+        headers={"X-User-ID": str(user.id)},
+    )
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["skipped"] is False
+    assert body["document_id"] is not None
+    assert body["chunk_count"] == 1
+    # The retry reuses the row, because (collection_id, content_hash) is unique.
+    assert body["source_id"] == str(failed_source.id)
+
+    listed = await client.get(
+        f"/api/kb/collections/{collection.id}/sources",
+        headers={"X-User-ID": str(user.id)},
+    )
+    sources = listed.json()["sources"]
+    assert len(sources) == 1
+    assert sources[0]["ingest_status"] == "completed"
+
+
+async def test_upload_can_re_add_a_soft_deleted_file(
+    client: AsyncClient,
+    db_session: AsyncSession,
+    monkeypatch: MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Re-uploading a deleted file must restore it, not hit the unique index.
+
+    ``uq_sources_collection_content_hash`` does not exclude soft-deleted rows, so an
+    insert of the same bytes would raise IntegrityError and surface as a 500.
+    """
+
+    _install_fake_ingest_embedding(monkeypatch)
+    _install_temporary_upload_storage(monkeypatch, tmp_path)
+    user = await _user(db_session, "restorer")
+    collection = await _private_collection(db_session, owner_id=user.id)
+    file_bytes = b"# Deleted then restored\n\nThe same bytes come back."
+    upload_payload = {
+        "files": {"file": ("restore.md", file_bytes, "text/markdown")},
+        "data": {
+            "collection_id": str(collection.id),
+            "kind": "material",
+            "platform": "general",
+            "content_type": "tutorial",
+        },
+        "headers": {"X-User-ID": str(user.id)},
+    }
+
+    first = await client.post("/api/kb/upload", **upload_payload)
+    assert first.status_code == 201, first.text
+    source_id = first.json()["source_id"]
+
+    deleted = await client.delete(
+        f"/api/kb/sources/{source_id}", headers={"X-User-ID": str(user.id)}
+    )
+    assert deleted.status_code == 204
+
+    again = await client.post("/api/kb/upload", **upload_payload)
+
+    assert again.status_code == 201, again.text
+    body = again.json()
+    assert body["skipped"] is False
+    assert body["chunk_count"] == 1
+
+    listed = await client.get(
+        f"/api/kb/collections/{collection.id}/sources",
+        headers={"X-User-ID": str(user.id)},
+    )
+    sources = listed.json()["sources"]
+    assert len(sources) == 1
+    assert sources[0]["ingest_status"] == "completed"
+    assert sources[0]["filename"] == "restore.md"

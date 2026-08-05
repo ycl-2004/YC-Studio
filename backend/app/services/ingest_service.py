@@ -11,7 +11,7 @@ from pathlib import Path
 from uuid import UUID
 
 import structlog
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import get_settings
@@ -167,9 +167,10 @@ async def ingest_document(
     settings = get_settings()
     content_hash = compute_content_hash(file_bytes)
 
-    # ── Dedup: same bytes in the same collection short-circuit before any work ──
-    existing_source = await _find_existing_source(session, collection_id, content_hash)
-    if existing_source is not None:
+    # ── Dedup: same bytes in the same collection short-circuit before any work,
+    #    unless the existing row is a failed or deleted one the user is retrying ──
+    existing_source = await find_existing_source(session, collection_id, content_hash)
+    if existing_source is not None and not is_reingestable(existing_source):
         logger.info(
             "Duplicate file detected, short-circuiting",
             filename=filename,
@@ -187,17 +188,30 @@ async def ingest_document(
     if collection is None:
         raise ValueError(f"Collection {collection_id} not found")
 
-    source = Source(
-        collection_id=collection_id,
-        filename=filename,
-        content_hash=content_hash,
-        dir_path=dir_path,
-        ingest_status=IngestStatus.PENDING,
-    )
-    session.add(source)
-    await session.flush()
+    if existing_source is None:
+        source = Source(
+            collection_id=collection_id,
+            filename=filename,
+            content_hash=content_hash,
+            dir_path=dir_path,
+            ingest_status=IngestStatus.PENDING,
+        )
+        session.add(source)
+        await session.flush()
+        logger.info("Source record created", source_id=str(source.id), filename=filename)
+    else:
+        source = await reset_source_for_reingest(
+            session,
+            existing_source,
+            filename=filename,
+            dir_path=dir_path,
+        )
+        logger.info(
+            "Retrying a previously failed or deleted source",
+            source_id=str(source.id),
+            filename=filename,
+        )
     source_id = source.id
-    logger.info("Source record created", source_id=str(source_id), filename=filename)
 
     savepoint = await session.begin_nested()
     try:
@@ -445,19 +459,62 @@ async def _run_pipeline(
     )
 
 
-async def _find_existing_source(
+async def find_existing_source(
     session: AsyncSession,
     collection_id: UUID,
     content_hash: str,
 ) -> Source | None:
-    """Check if a source with matching (collection_id, content_hash) already exists."""
+    """Find any source with this (collection_id, content_hash), deleted ones included.
+
+    Soft-deleted rows must be part of the answer: ``uq_sources_collection_content_hash``
+    covers them too, so treating one as absent and inserting a second row for the same
+    bytes raises a UniqueViolationError instead of re-adding the file.
+    """
+
     stmt = select(Source).where(
         Source.collection_id == collection_id,
         Source.content_hash == content_hash,
-        Source.deleted_at.is_(None),
     )
     result = await session.execute(stmt)
     return result.scalar_one_or_none()
+
+
+def is_reingestable(source: Source) -> bool:
+    """Whether an existing row for these bytes is a retry rather than a duplicate.
+
+    Deduplication exists to avoid ingesting the same bytes twice, not to stop a user
+    from recovering. A failed row never produced a usable document, and a deleted row
+    was removed on purpose — re-uploading either is a deliberate retry, and refusing it
+    left the user with no way back except editing the file to change its hash.
+    """
+
+    return source.deleted_at is not None or source.ingest_status is IngestStatus.FAILED
+
+
+async def reset_source_for_reingest(
+    session: AsyncSession,
+    source: Source,
+    *,
+    filename: str,
+    dir_path: str | None,
+) -> Source:
+    """Return a retried row to a clean pending state, reusing its identity.
+
+    The row is reused rather than replaced because the unique index forbids a second
+    row for the same bytes. Its old documents are deleted outright — the retry writes a
+    fresh one, and their chunks follow through ``ON DELETE CASCADE`` on
+    ``chunks.document_id``. The filename is refreshed because the same content may come
+    back under a different name.
+    """
+
+    await session.execute(delete(Document).where(Document.source_id == source.id))
+    source.filename = filename
+    source.dir_path = dir_path
+    source.deleted_at = None
+    source.error_message = None
+    source.ingest_status = IngestStatus.PENDING
+    await session.flush()
+    return source
 
 
 async def _bulk_insert_chunks(

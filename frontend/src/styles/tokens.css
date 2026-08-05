@@ -1,0 +1,205 @@
+/* =========================================================================
+   YC Design System — Design Tokens  ·  v1.0 Expanded  ·  2026-07-05
+   Brand DNA stays fixed; this file only completes the system.
+   Anchor values (★) are unchanged from brand-dna.md / YC_Website styles.css.
+   Usage: paste into :root of any YC surface, then reference var(--token).
+   ========================================================================= */
+
+:root {
+
+  /* -------------------------------------------------------------------------
+     BRAND ANCHORS  (semantic — the most stable layer)
+     wine = judgment/action · denim = system · blush = emotion (accent only)
+     ------------------------------------------------------------------------- */
+  --wine:        #B23A48;   /* ★ YC / 主判断 / 主叙事 / 主行动 */
+  --wine-deep:   #8E2C3A;   /* ★ hover / 深文字 / 图表强调 */
+  --denim:       #3B6EA5;   /* ★ 技术 / 系统 / 连接 */
+  --denim-deep:  #346294;   /* ★ 浅底上的可读系统文字 */
+  --denim-light: #9DBDE0;   /* ★ 深色面上的系统文字 / 链接 */
+  --denim-soft:  #DCE7F2;   /* ★ 选中态 / 解释底 / 辅助面 */
+  --blush:       #CB5A78;   /* ★ 情感 / 提醒（点睛，不承载正文） */
+  --blush-deep:  #9F3754;   /* ★ 可读情感文字 / 粉色语义标签 */
+
+  /* -------------------------------------------------------------------------
+     COLOR RAMPS 50–900  (expansion — anchors kept in place)
+     ------------------------------------------------------------------------- */
+  --wine-50:   #FBF0F1;
+  --wine-100:  #F4D9DC;
+  --wine-200:  #E7B2B9;
+  --wine-300:  #D98A94;
+  --wine-400:  #C55E6C;
+  --wine-500:  #B23A48;   /* = --wine */
+  --wine-600:  #9E3341;
+  --wine-700:  #8E2C3A;   /* = --wine-deep */
+  --wine-800:  #6E222D;
+  --wine-900:  #4E1820;
+
+  --denim-50:  #EEF4FA;
+  --denim-100: #DCE7F2;   /* = --denim-soft */
+  --denim-200: #C1D5EB;
+  --denim-300: #9DBDE0;   /* = --denim-light */
+  --denim-400: #6C96C6;
+  --denim-500: #3B6EA5;   /* = --denim */
+  --denim-600: #346294;   /* = --denim-deep */
+  --denim-700: #2B527C;
+  --denim-800: #223F60;
+  --denim-900: #182C43;
+
+  --blush-50:  #FBEDF1;
+  --blush-100: #F6D7DE;
+  --blush-200: #ECB2C0;
+  --blush-300: #E08A9E;
+  --blush-400: #D97188;
+  --blush-500: #CB5A78;   /* = --blush */
+  --blush-600: #B44766;
+  --blush-700: #9F3754;   /* = --blush-deep */
+  --blush-800: #7B2B42;
+  --blush-900: #581E30;
+
+  /* -------------------------------------------------------------------------
+     NEUTRALS  (warm-tinted: paper → ink)
+     ------------------------------------------------------------------------- */
+  --paper:      #FFFDF8;   /* ★ content surface (cards, app surface) */
+  --cream:      #FEFCF6;   /* ★ 主环境 / page background  (= --n-25) */
+  --cream-deep: #FAF6EB;   /* ★ 次环境 / 区段交替        (= --n-50) */
+  --n-100:      #F1EDE2;
+  --n-200:      #E3DDD0;
+  --n-300:      #CEC8B9;
+  --n-400:      #A8A39A;
+  --n-500:      #7B7A80;
+  --ink-faint:  #626272;   /* ★ 辅助文字  (= --n-600) */
+  --ink-muted:  #4A4A5A;   /* ★ 次文字    (= --n-700) */
+  --n-800:      #29293A;
+  --ink:        #1A1A2E;   /* ★ 主文字    (= --n-900) */
+  --night:      #151821;   /* ★ 深色节奏面 */
+
+  /* -------------------------------------------------------------------------
+     BORDERS & DIVIDERS
+     ------------------------------------------------------------------------- */
+  --border-subtle:  rgba(26,26,46,.08);
+  --border-default: rgba(26,26,46,.12);
+  --border-strong:  rgba(26,26,46,.16);
+  --border-dashed:  rgba(59,110,165,.34);   /* denim dashed structure */
+  --border-dark:    rgba(255,255,255,.14);  /* on --night surfaces */
+
+  /* -------------------------------------------------------------------------
+     SEMANTIC STATES  (info reuses denim; success/warning/error added, warm)
+     Never use --wine for error — wine stays brand/primary-action only.
+     ------------------------------------------------------------------------- */
+  --info:         #3B6EA5;  --info-soft:    #DCE7F2;  --info-deep:    #346294;
+  --success:      #5E8C68;  --success-soft: #E7EFE7;  --success-deep: #47714F;
+  --warning:      #BE7A2E;  --warning-soft: #F7EAD3;  --warning-deep: #8F5716;
+  --error:        #CB4B33;  --error-soft:   #F7DFD7;  --error-deep:   #9E3320;
+
+  /* -------------------------------------------------------------------------
+     TYPOGRAPHY
+     ------------------------------------------------------------------------- */
+  --font-serif:  'Huiwen Mincho', 'Noto Serif SC', serif;      /* zh headings */
+  --font-sans:   'Noto Sans SC', -apple-system, 'PingFang SC', sans-serif; /* body/UI */
+  --font-accent: 'Fraunces', serif;      /* english editorial, italic */
+  --font-hand:   'Caveat', cursive;      /* handwritten note, 1 per screen */
+  --font-code:   'Fira Code', monospace; /* code / terminal / data */
+
+  --fs-hero:    clamp(2.6rem, 6.5vw, 5.4rem);
+  --fs-section: clamp(1.65rem, 4vw, 2.7rem);
+  --fs-h3:      clamp(1.25rem, 2.4vw, 1.6rem);
+  --fs-lead:    1.15rem;
+  --fs-body:    1rem;
+  --fs-small:   0.875rem;
+  --fs-caption: 0.72rem;
+
+  --lh-tight:   1.15;
+  --lh-body:    1.8;    /* 1.7–1.9 range */
+  --tracking-caption: 0.28em;
+
+  /* -------------------------------------------------------------------------
+     SPACING  (8px base)
+     ------------------------------------------------------------------------- */
+  --sp-1:  4px;
+  --sp-2:  8px;
+  --sp-3:  12px;
+  --sp-4:  16px;
+  --sp-6:  24px;
+  --sp-8:  32px;
+  --sp-12: 48px;
+  --sp-16: 64px;
+  --sp-24: 96px;
+  --sp-section: clamp(72px, 10vh, 140px);
+
+  /* -------------------------------------------------------------------------
+     LAYOUT WIDTHS
+     ------------------------------------------------------------------------- */
+  --w-read:  820px;    /* reading (long-form / teaching) */
+  --w-show:  1240px;   /* display (landing / boards); range 1180–1300 */
+
+  /* -------------------------------------------------------------------------
+     RADIUS
+     ------------------------------------------------------------------------- */
+  --r-control: 8px;    /* buttons, inputs, chips */
+  --r-content: 12px;   /* content surfaces */
+  --r-panel:   20px;   /* primary panels */
+  --r-pill:    999px;  /* pills / badges */
+
+  /* -------------------------------------------------------------------------
+     ELEVATION  (light & sparse — prefer spacing/borders over shadow)
+     ------------------------------------------------------------------------- */
+  --sh-xs:   0 2px 10px rgba(0,0,0,.03);
+  --sh-sm:   0 7px 18px rgba(16,17,27,.12);
+  --sh-md:   0 16px 34px rgba(26,26,46,.11);
+  --sh-lg:   0 24px 60px rgba(178,58,72,.16);
+  --sh-wine: 0 8px 22px rgba(178,58,72,.22);   /* primary button */
+
+  /* -------------------------------------------------------------------------
+     MOTION  (opacity/transform only · enter once · honor reduced-motion)
+     ------------------------------------------------------------------------- */
+  --dur-fast:   140ms;   /* hover, focus, small state changes */
+  --dur-base:   240ms;   /* buttons, cards, toggles */
+  --dur-slow:   520ms;   /* section reveal, lightbox */
+  --ease-out:   cubic-bezier(.22,.61,.36,1);   /* default entrances/exits */
+  --ease-inout: cubic-bezier(.65,.05,.36,1);   /* moves that come back */
+  --lift:       translateY(-3px);              /* card / button hover */
+  --reveal-y:   16px;                          /* enter-once translateY start */
+
+  /* CONFETTI palette (from YC_Website Hero — conversion moments only) */
+  --confetti-1: #E8657A;  /* blush */
+  --confetti-2: #5B8CD1;  /* denim */
+  --confetti-3: #F4B740;  /* warm gold */
+  --confetti-4: #5E8C68;  /* success green */
+  --confetti-5: #B23A48;  /* wine */
+
+  /* TEXTURE tints (build via CSS gradients — see reference page) */
+  --tex-line:  rgba(26,26,46,.05);   /* grid / ruled paper */
+  --tex-stripe: rgba(178,58,72,.06); /* wine hairline stripes */
+}
+
+/* =========================================================================
+   MOTION PRIMITIVES  — copy the ones you use.
+   ========================================================================= */
+
+/* Enter-once reveal: start hidden, add .is-in (via IntersectionObserver). */
+.yc-reveal      { opacity: 0; transform: translateY(var(--reveal-y));
+                  transition: opacity var(--dur-slow) var(--ease-out),
+                              transform var(--dur-slow) var(--ease-out); }
+.yc-reveal.is-in{ opacity: 1; transform: none; }
+
+/* Hover lift for cards / buttons. */
+.yc-lift        { transition: transform var(--dur-base) var(--ease-out),
+                              box-shadow var(--dur-base) var(--ease-out); }
+.yc-lift:hover  { transform: var(--lift); box-shadow: var(--sh-md); }
+
+/* Link underline that draws in from the left. */
+.yc-underline   { position: relative; text-decoration: none; color: var(--wine); }
+.yc-underline::after{ content:""; position:absolute; left:0; bottom:-2px;
+                  width:100%; height:1.5px; background: currentColor;
+                  transform: scaleX(0); transform-origin: left;
+                  transition: transform var(--dur-base) var(--ease-out); }
+.yc-underline:hover::after{ transform: scaleX(1); }
+
+/* Visible focus ring — required on every control. */
+.yc-focus:focus-visible{ outline: none;
+                  box-shadow: 0 0 0 3px rgba(59,110,165,.35); }
+
+@media (prefers-reduced-motion: reduce){
+  .yc-reveal { opacity: 1; transform: none; transition: none; }
+  .yc-lift, .yc-underline::after { transition: none; }
+}

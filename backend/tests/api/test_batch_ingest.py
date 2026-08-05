@@ -4,6 +4,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from uuid import UUID
 
+import pytest
 from httpx import AsyncClient
 from pytest import MonkeyPatch
 from sqlalchemy import select
@@ -227,3 +228,82 @@ async def test_worker_ingested_chunks_are_searchable_by_dir_path(
     results = response.json()["results"]
     assert len(results) == 1
     assert results[0]["document"]["id"] == folder_result["document_id"]
+
+
+async def test_batch_upload_requeues_a_failed_source_instead_of_rejecting_the_batch(
+    db_session: AsyncSession,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """Retrying a batch whose file failed must re-queue it, not fail the whole batch.
+
+    The old membership check keyed on (collection, content hash) alone, so one failed
+    file made every later batch containing those bytes return 422 for all of them.
+    """
+
+    _install_fake_ingest_embedding(monkeypatch)
+    user = await _user(db_session, "batch-retrier")
+    collection = await _private_collection(db_session, owner_id=user.id)
+    metadata = {"platform": "general", "content_type": "tutorial"}
+    upload = PendingUpload("flaky.md", b"# Flaky\n\nFails once, then succeeds.", "folder")
+
+    _, first_sources = await create_pending_batch(
+        db_session,
+        current_user_id=user.id,
+        collection_id=collection.id,
+        kind=CollectionKind.MATERIAL,
+        metadata=metadata,
+        uploads=[upload],
+    )
+    failed_source_id = first_sources[0].id
+    first_sources[0].ingest_status = IngestStatus.FAILED
+    first_sources[0].error_message = "the parser crashed"
+    await db_session.flush()
+
+    second_batch, second_sources = await create_pending_batch(
+        db_session,
+        current_user_id=user.id,
+        collection_id=collection.id,
+        kind=CollectionKind.MATERIAL,
+        metadata=metadata,
+        uploads=[upload],
+    )
+
+    # The unique index spans deleted rows too, so the retry reuses the same row.
+    assert second_sources[0].id == failed_source_id
+    assert second_sources[0].ingest_status is IngestStatus.PENDING
+    assert second_sources[0].error_message is None
+    assert second_sources[0].batch_id == second_batch.id
+
+
+async def test_batch_upload_still_rejects_a_file_already_ingested(
+    db_session: AsyncSession,
+    monkeypatch: MonkeyPatch,
+) -> None:
+    """A completed file is still a duplicate; only failed/deleted rows are retries."""
+
+    _install_fake_ingest_embedding(monkeypatch)
+    user = await _user(db_session, "batch-duplicate")
+    collection = await _private_collection(db_session, owner_id=user.id)
+    metadata = {"platform": "general", "content_type": "tutorial"}
+    upload = PendingUpload("done.md", b"# Done\n\nAlready in the collection.", None)
+
+    _, sources = await create_pending_batch(
+        db_session,
+        current_user_id=user.id,
+        collection_id=collection.id,
+        kind=CollectionKind.MATERIAL,
+        metadata=metadata,
+        uploads=[upload],
+    )
+    sources[0].ingest_status = IngestStatus.COMPLETED
+    await db_session.flush()
+
+    with pytest.raises(ValueError, match="already contains"):
+        await create_pending_batch(
+            db_session,
+            current_user_id=user.id,
+            collection_id=collection.id,
+            kind=CollectionKind.MATERIAL,
+            metadata=metadata,
+            uploads=[upload],
+        )

@@ -67,6 +67,11 @@ services:
         condition: service_healthy
     volumes:
       - upload_data:/app/data/uploads
+      # EMBEDDING_LOCAL_FILES_ONLY=true means the image never downloads a model, and
+      # the image does not ship one either — so without the host cache mounted here,
+      # every searchable (case/material) ingest fails with LocalEntryNotFoundError.
+      # Rule and template libraries skip embedding, which is why seeding still works.
+      - ${HF_CACHE_DIR:-${HOME}/.cache/huggingface}:/app/.cache/huggingface
 
   worker:
     image: ycstudio-backend:local
@@ -86,6 +91,7 @@ services:
       RUN_MIGRATIONS: "0"
       SEED_PUBLIC_LIBRARIES: "0"
     command: ["arq", "app.tasks.worker.WorkerSettings"]
+    # The worker runs the same ingest pipeline, so it needs the same model cache.
     # The image's HEALTHCHECK curls :8000/health, which only the backend service
     # serves. ARQ has no HTTP endpoint, so that probe would always fail here and
     # report a running worker as "unhealthy" — disable it rather than lie.
@@ -98,12 +104,18 @@ services:
         condition: service_healthy
     volumes:
       - upload_data:/app/data/uploads
+      - ${HF_CACHE_DIR:-${HOME}/.cache/huggingface}:/app/.cache/huggingface
 
   frontend:
     image: ycstudio-frontend:local
     build:
       context: ./frontend
       dockerfile: Dockerfile
+      args:
+        # The composed stack has a real backend behind nginx, so it serves the real
+        # knowledge-base API. Set VITE_USE_MOCK=1 in backend/.env and rebuild to get
+        # the demo data back.
+        VITE_USE_MOCK: ${VITE_USE_MOCK:-false}
     restart: unless-stopped
     ports:
       - "127.0.0.1:${FRONTEND_PORT:-5173}:80"

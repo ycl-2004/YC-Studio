@@ -9,9 +9,11 @@ from pathlib import Path
 from typing import Annotated
 from uuid import UUID
 
+import structlog
 from arq import create_pool
 from arq.connections import RedisSettings
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, UploadFile, status
+from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.adapters.storage import LocalUploadStorage
@@ -32,7 +34,10 @@ from app.schemas.kb import (
     SearchResponse,
     SearchResult,
     SearchSource,
+    SourceChunkPreview,
     SourceListResponse,
+    SourcePreviewMode,
+    SourcePreviewResponse,
     SourceSummary,
     UploadResponse,
 )
@@ -42,7 +47,9 @@ from app.services.kb_service import (
     CollectionKindMismatchError,
     CollectionNotFoundError,
     PendingUpload,
+    SourceFileNotFoundError,
     SourceNotFoundError,
+    UnknownPrincipalError,
     UnsupportedSearchKindError,
     create_pending_batch,
     create_private_collection,
@@ -50,11 +57,15 @@ from app.services.kb_service import (
     delete_source,
     get_batch_progress,
     get_collection,
+    get_source_preview,
     ingest_private_upload,
     list_collections,
     list_sources,
+    resolve_source_file,
     search_chunks,
 )
+
+logger = structlog.stdlib.get_logger(__name__)
 
 router = APIRouter(prefix="/kb", tags=["knowledge-base"])
 
@@ -73,24 +84,54 @@ _MIME_TYPES_BY_SUFFIX: dict[str, frozenset[str]] = {
 }
 _READ_CHUNK_BYTES = 1_048_576
 
+# What the download/preview endpoint serves each stored original as, plus how a client
+# should render it. HTML is deliberately demoted to text/plain and download-only: it is
+# user-supplied markup, and serving it inline from the API origin would let an uploaded
+# file run script against that origin.
+_TEXT_MEDIA_TYPE = "text/plain; charset=utf-8"
+_SERVED_FILE_BY_SUFFIX: dict[str, tuple[str, SourcePreviewMode]] = {
+    ".md": ("text/markdown; charset=utf-8", SourcePreviewMode.TEXT),
+    ".markdown": ("text/markdown; charset=utf-8", SourcePreviewMode.TEXT),
+    ".txt": (_TEXT_MEDIA_TYPE, SourcePreviewMode.TEXT),
+    ".htm": (_TEXT_MEDIA_TYPE, SourcePreviewMode.DOWNLOAD),
+    ".html": (_TEXT_MEDIA_TYPE, SourcePreviewMode.DOWNLOAD),
+    ".pdf": ("application/pdf", SourcePreviewMode.PDF),
+    ".docx": (
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        SourcePreviewMode.DOWNLOAD,
+    ),
+}
 
-def _assert_every_parsed_suffix_has_mime_types() -> None:
+# Bounds for one preview payload. A 10 MB upload parses into far more text than a drawer
+# should render at once, so the response carries a prefix and says that it did.
+_PREVIEW_RAW_TEXT_LIMIT = 200_000
+_PREVIEW_DEFAULT_CHUNK_LIMIT = 200
+_PREVIEW_MAX_CHUNK_LIMIT = 1_000
+
+
+def _assert_every_parsed_suffix_is_mapped() -> None:
     """Fail at import instead of rejecting a parsable upload with an empty expected set.
 
     ``ParserFactory`` is the single source of truth for what can be parsed.  Registering a
     parser without listing its content types would otherwise make that format permanently
-    unuploadable, so the mismatch is raised here rather than discovered by a user.
+    unuploadable — or uploadable but impossible to preview — so the mismatch is raised
+    here rather than discovered by a user.
     """
 
-    unmapped = sorted(set(ParserFactory.supported_suffixes()) - set(_MIME_TYPES_BY_SUFFIX))
-    if unmapped:
-        raise RuntimeError(
-            f"Parsable suffixes without an upload content-type mapping: {', '.join(unmapped)}. "
-            "Add them to _MIME_TYPES_BY_SUFFIX."
-        )
+    supported_suffixes = set(ParserFactory.supported_suffixes())
+    for table_name, table in (
+        ("_MIME_TYPES_BY_SUFFIX", _MIME_TYPES_BY_SUFFIX),
+        ("_SERVED_FILE_BY_SUFFIX", _SERVED_FILE_BY_SUFFIX),
+    ):
+        unmapped = sorted(supported_suffixes - set(table))
+        if unmapped:
+            raise RuntimeError(
+                f"Parsable suffixes missing from {table_name}: {', '.join(unmapped)}. "
+                f"Add them to {table_name}."
+            )
 
 
-_assert_every_parsed_suffix_has_mime_types()
+_assert_every_parsed_suffix_is_mapped()
 
 
 @router.post(
@@ -133,12 +174,35 @@ async def upload_file(
             detail=str(error),
         ) from error
 
+    if not result.skipped:
+        await _store_original_bytes(result.source_id, filename, file_bytes)
+
     return UploadResponse(
         source_id=result.source_id,
         document_id=result.document_id,
         chunk_count=result.chunk_count,
         skipped=result.skipped,
     )
+
+
+async def _store_original_bytes(source_id: UUID, filename: str, file_bytes: bytes) -> None:
+    """Keep the uploaded original so it can be previewed and downloaded later.
+
+    Unlike the batch route, this runs after the ingest transaction has committed: the
+    document is already parsed, chunked and searchable. A storage failure therefore must
+    not turn a successful ingest into an error — it only costs the user the original-file
+    preview, which the preview endpoint reports as ``original_available: false``.
+    """
+
+    try:
+        await LocalUploadStorage().save(source_id, filename, file_bytes)
+    except OSError as error:
+        logger.warning(
+            "upload.original_not_stored",
+            source_id=str(source_id),
+            filename=filename,
+            error=str(error),
+        )
 
 
 @router.post(
@@ -414,6 +478,13 @@ async def create_kb_collection(
         )
     except CollectionAlreadyExistsError as error:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(error)) from error
+    except UnknownPrincipalError as error:
+        # The identity in X-User-ID is well-formed but names nobody, so this is a
+        # rejected principal (401), not a conflict the caller could rename away.
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail=str(error),
+        ) from error
 
     await session.commit()
     return CollectionResponse(
@@ -493,6 +564,121 @@ async def list_kb_sources(
             for source in sources
         ]
     )
+
+
+@router.get(
+    "/sources/{source_id}/preview",
+    response_model=SourcePreviewResponse,
+    summary="Get one source's file facts, parsed text and ordered chunks",
+)
+async def preview_kb_source(
+    source_id: UUID,
+    current_user_id: Annotated[UUID, Depends(get_current_user_id)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    chunk_limit: Annotated[
+        int, Query(ge=1, le=_PREVIEW_MAX_CHUNK_LIMIT)
+    ] = _PREVIEW_DEFAULT_CHUNK_LIMIT,
+) -> SourcePreviewResponse:
+    """Return everything the management UI renders for one uploaded document."""
+
+    try:
+        preview = await get_source_preview(
+            session,
+            current_user_id=current_user_id,
+            source_id=source_id,
+            raw_text_limit=_PREVIEW_RAW_TEXT_LIMIT,
+            chunk_limit=chunk_limit,
+        )
+    except SourceNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    except CollectionAccessError as error:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(error)) from error
+
+    suffix = Path(preview.filename).suffix.casefold()
+    media_type, preview_mode = _served_file_for(suffix)
+    return SourcePreviewResponse(
+        source_id=preview.source_id,
+        filename=preview.filename,
+        suffix=suffix,
+        media_type=media_type,
+        preview_mode=preview_mode,
+        ingest_status=preview.ingest_status,
+        dir_path=preview.dir_path,
+        created_at=preview.created_at,
+        error_message=preview.error_message,
+        original_available=preview.stored_file is not None,
+        size_bytes=None if preview.stored_file is None else preview.stored_file.size_bytes,
+        document_id=preview.document_id,
+        title=preview.title,
+        raw_text=preview.raw_text,
+        raw_text_truncated=preview.raw_text_truncated,
+        chunk_count=preview.chunk_count,
+        chunks=[
+            SourceChunkPreview(
+                chunk_id=chunk.chunk_id,
+                ordinal=chunk.ordinal,
+                text=chunk.text,
+                token_count=chunk.token_count,
+            )
+            for chunk in preview.chunks
+        ],
+        chunks_truncated=preview.chunks_truncated,
+    )
+
+
+@router.get(
+    "/sources/{source_id}/file",
+    summary="Stream the original uploaded file for preview or download",
+    response_class=FileResponse,
+)
+async def download_kb_source_file(
+    source_id: UUID,
+    current_user_id: Annotated[UUID, Depends(get_current_user_id)],
+    session: Annotated[AsyncSession, Depends(get_session)],
+    download: Annotated[bool, Query(description="Force an attachment disposition")] = False,
+) -> FileResponse:
+    """Serve the stored original bytes; 404 when only the parsed text survives."""
+
+    try:
+        source, stored_file = await resolve_source_file(
+            session,
+            current_user_id=current_user_id,
+            source_id=source_id,
+        )
+    except SourceFileNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    except SourceNotFoundError as error:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(error)) from error
+    except CollectionAccessError as error:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(error)) from error
+
+    # Source.filename may carry a relative seed path; only its final component names the
+    # file on disk, and it is what the browser should use for a Save As.
+    download_name = Path(source.filename).name
+    media_type, preview_mode = _served_file_for(Path(download_name).suffix.casefold())
+    disposition = (
+        "attachment" if download or preview_mode is SourcePreviewMode.DOWNLOAD else "inline"
+    )
+    return FileResponse(
+        stored_file.path,
+        media_type=media_type,
+        filename=download_name,
+        content_disposition_type=disposition,
+        # The served type is chosen from the suffix above, never sniffed from content;
+        # nosniff stops a browser from overriding that and executing the file instead.
+        headers={"X-Content-Type-Options": "nosniff", "Cache-Control": "private, max-age=0"},
+    )
+
+
+def _served_file_for(suffix: str) -> tuple[str, SourcePreviewMode]:
+    """Map a stored suffix to its served content type and client render mode.
+
+    An unmapped suffix cannot reach the database through either upload route, but a
+    hand-inserted or future record must still degrade to a plain download rather than
+    raise a 500.
+    """
+
+    return _SERVED_FILE_BY_SUFFIX.get(suffix, (_UNKNOWN_MIME_TYPE, SourcePreviewMode.DOWNLOAD))
 
 
 @router.delete(

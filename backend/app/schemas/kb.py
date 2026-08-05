@@ -1,5 +1,6 @@
 """Request and response contracts for knowledge-base HTTP endpoints."""
 
+import enum
 from datetime import datetime
 from typing import Annotated
 from uuid import UUID
@@ -138,3 +139,54 @@ class SourceListResponse(BaseModel):
     """Uploaded sources (documents) in a collection, newest first."""
 
     sources: list[SourceSummary]
+
+
+class SourcePreviewMode(enum.StrEnum):
+    """How a client should render the original file, decided from its suffix."""
+
+    TEXT = "text"
+    PDF = "pdf"
+    DOWNLOAD = "download"
+
+
+class SourceChunkPreview(BaseModel):
+    """One stored chunk in document order, without its embedding vector."""
+
+    chunk_id: UUID
+    ordinal: int
+    text: str
+    token_count: Annotated[int, Field(ge=0)]
+
+
+class SourcePreviewResponse(BaseModel):
+    """Everything the management UI shows for one uploaded file.
+
+    ``raw_text`` is the parsed document text, which exists for every completed source.
+    ``original_available`` reports whether the uploaded bytes themselves are still on
+    disk and can be fetched from the file endpoint — public seed libraries and older
+    synchronous uploads have parsed text but no stored original.
+    """
+
+    source_id: UUID
+    filename: str
+    suffix: str
+    media_type: Annotated[
+        str,
+        Field(description="The Content-Type the file endpoint serves this source with."),
+    ]
+    preview_mode: SourcePreviewMode
+    ingest_status: IngestStatus
+    dir_path: str | None
+    created_at: datetime
+    error_message: str | None
+
+    original_available: bool
+    size_bytes: Annotated[int, Field(ge=0)] | None
+
+    document_id: UUID | None
+    title: str | None
+    raw_text: str | None
+    raw_text_truncated: bool
+    chunk_count: Annotated[int, Field(ge=0)]
+    chunks: list[SourceChunkPreview]
+    chunks_truncated: bool
